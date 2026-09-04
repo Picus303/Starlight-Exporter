@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/StarlightExporter.Cli/StarlightExporter.Cli.csproj" />
     <Project Path="src/StarlightExporter.Mapping/StarlightExporter.Mapping.csproj" />
+    <Project Path="src/StarlightExporter.Persistence/StarlightExporter.Persistence.csproj" />
     <Project Path="src/StarlightExporter.Snapshot/StarlightExporter.Snapshot.csproj" />
   </Folder>
   <Folder Name="/tests/">

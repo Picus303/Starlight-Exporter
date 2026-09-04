@@ -64,7 +64,7 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
         NetPlayerState state,
         List<MappingIssue> issues)
     {
-        foreach (SnapshotMaterial source in materials)
+        foreach (SnapshotMaterial source in materials.OrderBy(material => material.ItemId))
         {
             if (!gameData.MaterialData.TryGetValue(source.ItemId, out var resource)
                 || !resource.IsInventoryMaterial)
@@ -99,7 +99,7 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
     {
         var mappedGuids = new HashSet<ulong>();
 
-        foreach (SnapshotWeapon source in weapons)
+        foreach (SnapshotWeapon source in weapons.OrderBy(weapon => weapon.Guid))
         {
             if (!gameData.WeaponData.TryGetValue(source.ItemId, out var resource))
             {
@@ -140,7 +140,7 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
     {
         var mappedGuids = new HashSet<ulong>();
 
-        foreach (SnapshotAvatar source in avatars)
+        foreach (SnapshotAvatar source in avatars.OrderBy(avatar => avatar.AvatarId))
         {
             if (!CanCreateAvatar(source.AvatarId))
             {

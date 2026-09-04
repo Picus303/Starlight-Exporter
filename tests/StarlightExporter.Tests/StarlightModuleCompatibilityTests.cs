@@ -1,19 +1,11 @@
 using Google.Protobuf;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Starlight.Common;
-using Starlight.Game.Modules;
 using Starlight.Game.Player;
 using Starlight.Game.Resources;
-using Starlight.Game.Resources.Binary;
-using Starlight.Game.Resources.Excel;
 using Starlight.Protocol;
 using Starlight.Rpc.Proto;
-using Starlight.Rpc.Tunnel;
 using StarlightExporter.Mapping;
 using StarlightExporter.Snapshot;
 using Xunit;
-using IMessage = Starlight.Protobuf.Core.IMessage;
 
 namespace StarlightExporter.Tests;
 
@@ -22,7 +14,7 @@ public sealed class StarlightModuleCompatibilityTests
     [Fact]
     public async Task MinimalSnapshotMapsAndLoadsWithoutStarlightRepair()
     {
-        GameData data = CreateGameData();
+        GameData data = TestGameData.Create();
         data.MaterialData[1001].StackLimit = 5;
         data.WeaponData[11101].GadgetId = 50099999;
         data.WeaponData[11101].SkillAffix = [11999];
@@ -45,7 +37,7 @@ public sealed class StarlightModuleCompatibilityTests
         Assert.Equal(expected: 4, mapping.State.AvatarTeams.Count);
 
         byte[] stateBeforeLogin = mapping.State.ToByteArray();
-        var (player, sent) = CreatePlayer(data, mapping.State, mapping.Profile);
+        var (player, sent) = TestStarlightPlayer.Create(data, mapping.State, mapping.Profile);
 
         await player.Module<InventoryModule>().OnLogin();
         AvatarDataNotify avatarNotify = await player.Module<AvatarModule>().OnLogin();
@@ -64,10 +56,10 @@ public sealed class StarlightModuleCompatibilityTests
     [Fact]
     public async Task PinnedStarlightLoadsKnownGoodStateWithoutRepair()
     {
-        GameData data = CreateGameData();
+        GameData data = TestGameData.Create();
         NetPlayerState state = CreateKnownGoodState();
         byte[] stateBeforeLogin = state.ToByteArray();
-        var (player, sent) = CreatePlayer(data, state);
+        var (player, sent) = TestStarlightPlayer.Create(data, state);
 
         InventoryModule inventory = player.Module<InventoryModule>();
         AvatarModule avatars = player.Module<AvatarModule>();
@@ -112,40 +104,6 @@ public sealed class StarlightModuleCompatibilityTests
         Assert.Single(reparsed.Weapons);
         Assert.Single(reparsed.Avatars);
         Assert.Equal(expected: 4, reparsed.AvatarTeams.Count);
-    }
-
-    private static (StarlightPlayer Player, List<IMessage> Sent) CreatePlayer(
-        GameData data,
-        NetPlayerState state,
-        NetPlayerProfile? profile = null)
-    {
-        ServiceProvider services = new ServiceCollection()
-            .AddLogging()
-            .BuildServiceProvider();
-        var registry = new ModuleRegistry();
-        var guidManager = new GuidManager(serverId: 1);
-
-        registry.AddModule<InventoryModule>((_, player) => new InventoryModule(player, guidManager, data));
-        registry.AddModule<AvatarModule>((_, player) => new AvatarModule(player, data, guidManager));
-        registry.AddModule<TeamModule>((_, player) => new TeamModule(player));
-        registry.Build();
-
-        var tunnel = new RecordingTunnel();
-
-        var player = new StarlightPlayer(services, registry, tunnel)
-        {
-            Uid = 765432100,
-            State = state,
-            Profile = profile ?? new NetPlayerProfile
-            {
-                Nickname = "Traveler",
-                Signature = "Sanitized fixture",
-                PictureId = 10000005,
-                NameCardId = 210001
-            }
-        };
-
-        return (player, tunnel.Sent);
     }
 
     private static NetPlayerState CreateKnownGoodState()
@@ -205,76 +163,4 @@ public sealed class StarlightModuleCompatibilityTests
         return team;
     }
 
-    private static GameData CreateGameData()
-    {
-        var data = new GameData(new ConfigurationBuilder().Build());
-        data.MaterialData[1001] = new MaterialData { Id = 1001, StackLimit = 9999 };
-        data.WeaponData[11101] = new WeaponData
-        {
-            Id = 11101,
-            GadgetId = 50011101,
-            SkillAffix = [11101]
-        };
-        data.AvatarData[10000005] = new AvatarData
-        {
-            Id = 10000005,
-            InitialWeapon = 11101,
-            SkillDepotId = 500,
-            HpBase = 100,
-            AttackBase = 20,
-            DefenseBase = 10,
-            CritChanceBase = 0.05f,
-            CritDamageBase = 0.5f
-        };
-        data.AvatarSkillDepotData[500] = new AvatarSkillDepotData
-        {
-            Id = 500,
-            Skills = [501],
-            EnergySkill = 502
-        };
-        data.Avatars[10000005] = new AvatarConfig();
-        return data;
-    }
-
-    private sealed class RecordingTunnel : RpcTunnel
-    {
-        public List<IMessage> Sent { get; } = [];
-
-        protected override TunnelMessage Serialize(IMessage message) => new RecordingMessage(message);
-
-        public override IDisposable Subscribe(int id, AsyncTunnelHandler handler) => NoopDisposable.Instance;
-
-        public override IDisposable Subscribe(string id, AsyncTunnelHandler handler) => NoopDisposable.Instance;
-
-        public override Task Publish(int id, TunnelMessage message) => Record(message);
-
-        public override Task Publish(string id, TunnelMessage message) => Record(message);
-
-        protected override void NotifyPeerClosed()
-        {
-        }
-
-        private Task Record(TunnelMessage message)
-        {
-            Sent.Add(message.Decode<IMessage>());
-            return Task.CompletedTask;
-        }
-    }
-
-    private sealed class RecordingMessage(IMessage message) : TunnelMessage
-    {
-        public override T? TryDecode<T>() where T : class => message as T;
-
-        public override IMessage? TryDecode(Type type) =>
-            type.IsInstanceOfType(message) ? message : null;
-    }
-
-    private sealed class NoopDisposable : IDisposable
-    {
-        public static NoopDisposable Instance { get; } = new();
-
-        public void Dispose()
-        {
-        }
-    }
 }
