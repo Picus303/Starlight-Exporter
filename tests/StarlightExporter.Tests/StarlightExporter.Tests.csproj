@@ -17,10 +17,11 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/StarlightExporter.Mapping/StarlightExporter.Mapping.csproj" />
     <ProjectReference Include="../../src/StarlightExporter.Snapshot/StarlightExporter.Snapshot.csproj" />
+    <ProjectReference Include="../../vendor/Starlight/Game/Starlight.Game.Player/Starlight.Game.Player.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="../Fixtures/*.json" Link="Fixtures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
-

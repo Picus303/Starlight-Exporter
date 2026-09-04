@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../StarlightExporter.Snapshot/StarlightExporter.Snapshot.csproj" />
+    <ProjectReference Include="../../vendor/Starlight/Game/Starlight.Game.Resources/Starlight.Game.Resources.csproj" />
+    <ProjectReference Include="../../vendor/Starlight/Libraries/Starlight.Rpc/Starlight.Rpc.csproj" />
+  </ItemGroup>
+</Project>
