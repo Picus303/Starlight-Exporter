@@ -1,0 +1,20 @@
+root = true
+
+[*.{cs,csproj,slnx}]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+
+[*.cs]
+dotnet_sort_system_directives_first = true
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_style_var_when_type_is_apparent = true:suggestion
+
+# Starlight represents protocol GUIDs as unsigned integers. Keeping the domain
+# name avoids inventing a different JSON contract solely to satisfy CA1720.
+dotnet_diagnostic.CA1720.severity = none
+
+[*.{json,md,yml,yaml}]
+indent_size = 2

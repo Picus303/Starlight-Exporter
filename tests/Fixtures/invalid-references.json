@@ -1,0 +1,38 @@
+{
+  "manifest": {
+    "schemaVersion": 1,
+    "starlightCommit": "c1cd286c4909d31d355006899c5905ef6adf9741",
+    "protocolVersion": "V70",
+    "capturedAtUtc": "2026-09-04T10:00:00Z",
+    "region": "test",
+    "officialUid": 765432100
+  },
+  "player": {
+    "nickname": "Traveler",
+    "bornState": "complete",
+    "bornAvatarId": 10000005,
+    "currentAvatarTeamId": 2
+  },
+  "materials": [],
+  "weapons": [],
+  "avatars": [
+    {
+      "avatarId": 10000005,
+      "guid": 30001,
+      "level": 20,
+      "constellation": 0,
+      "bornTime": 1788516000,
+      "weaponGuid": 99999
+    }
+  ],
+  "teams": [
+    {
+      "teamId": 1,
+      "name": "Broken team",
+      "avatarGuids": [30001],
+      "currentAvatarGuid": 99999
+    }
+  ],
+  "unsupported": []
+}
+

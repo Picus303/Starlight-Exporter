@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/StarlightExporter.Cli/StarlightExporter.Cli.csproj" />
+    <Project Path="src/StarlightExporter.Snapshot/StarlightExporter.Snapshot.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/StarlightExporter.Tests/StarlightExporter.Tests.csproj" />
+  </Folder>
+</Solution>
+

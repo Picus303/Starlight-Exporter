@@ -1,0 +1,57 @@
+{
+  "manifest": {
+    "schemaVersion": 1,
+    "starlightCommit": "c1cd286c4909d31d355006899c5905ef6adf9741",
+    "protocolVersion": "V70",
+    "capturedAtUtc": "2026-09-04T10:00:00Z",
+    "region": "test",
+    "officialUid": 765432100
+  },
+  "player": {
+    "nickname": "Traveler",
+    "signature": "Sanitized fixture",
+    "pictureId": 10000005,
+    "nameCardId": 210001,
+    "bornState": "complete",
+    "bornAvatarId": 10000005,
+    "currentAvatarTeamId": 1
+  },
+  "materials": [
+    {
+      "itemId": 1001,
+      "guid": 10001,
+      "count": 10
+    }
+  ],
+  "weapons": [
+    {
+      "itemId": 11101,
+      "guid": 20001,
+      "level": 20,
+      "refinement": 1,
+      "promoteLevel": 1,
+      "affixId": 11101,
+      "gadgetId": 50011101
+    }
+  ],
+  "avatars": [
+    {
+      "avatarId": 10000005,
+      "guid": 30001,
+      "level": 20,
+      "constellation": 0,
+      "bornTime": 1788516000,
+      "weaponGuid": 20001
+    }
+  ],
+  "teams": [
+    {
+      "teamId": 1,
+      "name": "Team 1",
+      "avatarGuids": [30001],
+      "currentAvatarGuid": 30001
+    }
+  ],
+  "unsupported": []
+}
+

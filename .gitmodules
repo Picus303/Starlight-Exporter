@@ -1,0 +1,3 @@
+[submodule "vendor/Starlight"]
+	path = vendor/Starlight
+	url = https://github.com/kitkat-multiverse/Starlight.git
