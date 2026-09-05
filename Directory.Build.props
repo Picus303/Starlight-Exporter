@@ -1,0 +1,6 @@
+<Project>
+  <!-- Keep the exporter warning-clean while isolating diagnostics owned by the pinned upstream tree. -->
+  <PropertyGroup Condition="$([System.String]::Copy('$(MSBuildProjectFullPath)').Replace('\', '/').Contains('/vendor/Starlight/'))">
+    <NoWarn>$(NoWarn);RS1038;AD0001;CS9113</NoWarn>
+  </PropertyGroup>
+</Project>

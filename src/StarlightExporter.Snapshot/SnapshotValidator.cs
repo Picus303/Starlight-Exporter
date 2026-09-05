@@ -22,6 +22,10 @@ public static class SnapshotValidator
         ValidateAvatars(snapshot.Avatars, snapshot.Weapons, errors);
         ValidateTeams(snapshot.Teams, snapshot.Avatars, snapshot.Player.CurrentAvatarTeamId, errors);
         ValidateBornAvatar(snapshot.Player, snapshot.Avatars, errors);
+        AddIf(snapshot.Unsupported.Count > SnapshotContract.MaximumUnsupportedRecords,
+            "UNSUPPORTED_RECORD_LIMIT_EXCEEDED",
+            $"At most {SnapshotContract.MaximumUnsupportedRecords} unsupported records are accepted.",
+            errors);
 
         return new SnapshotValidationResult(errors);
     }
@@ -59,9 +63,13 @@ public static class SnapshotValidator
     }
 
     private static void ValidateMaterials(
-        IReadOnlyCollection<SnapshotMaterial> materials,
+        List<SnapshotMaterial> materials,
         ICollection<SnapshotValidationError> errors)
     {
+        AddIf(materials.Count > SnapshotContract.MaximumMaterials,
+            "MATERIAL_LIMIT_EXCEEDED",
+            $"At most {SnapshotContract.MaximumMaterials} materials are accepted.",
+            errors);
         AddDuplicateErrors(materials.Select(material => material.ItemId),
             "MATERIAL_ITEM_ID_DUPLICATE", "material item ID", errors);
 
@@ -74,9 +82,13 @@ public static class SnapshotValidator
     }
 
     private static void ValidateWeapons(
-        IReadOnlyCollection<SnapshotWeapon> weapons,
+        List<SnapshotWeapon> weapons,
         ICollection<SnapshotValidationError> errors)
     {
+        AddIf(weapons.Count > SnapshotContract.MaximumWeapons,
+            "WEAPON_LIMIT_EXCEEDED",
+            $"At most {SnapshotContract.MaximumWeapons} weapons are accepted.",
+            errors);
         AddDuplicateErrors(weapons.Select(weapon => weapon.Guid),
             "WEAPON_GUID_DUPLICATE", "weapon GUID", errors);
 
@@ -90,10 +102,14 @@ public static class SnapshotValidator
     }
 
     private static void ValidateAvatars(
-        IReadOnlyCollection<SnapshotAvatar> avatars,
-        IReadOnlyCollection<SnapshotWeapon> weapons,
+        List<SnapshotAvatar> avatars,
+        List<SnapshotWeapon> weapons,
         ICollection<SnapshotValidationError> errors)
     {
+        AddIf(avatars.Count > SnapshotContract.MaximumAvatars,
+            "AVATAR_LIMIT_EXCEEDED",
+            $"At most {SnapshotContract.MaximumAvatars} avatars are accepted.",
+            errors);
         AddDuplicateErrors(avatars.Select(avatar => avatar.Guid),
             "AVATAR_GUID_DUPLICATE", "avatar GUID", errors);
         AddDuplicateErrors(avatars.Select(avatar => avatar.AvatarId),

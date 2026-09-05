@@ -126,6 +126,61 @@ public sealed class StarlightDatabaseWriterTests
         }
     }
 
+    [Fact]
+    public async Task ZeroUidIsRejectedBeforeCreatingAFile()
+    {
+        string testDirectory = CreateTestDirectory();
+
+        try
+        {
+            string databasePath = Path.Combine(testDirectory, "starlight.db");
+            StarlightMappingResult mapping = await CreateMappingAsync();
+
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+                StarlightDatabaseWriter.WriteNewAsync(new StarlightDatabaseWriteRequest(
+                    databasePath,
+                    PlayerUid: 0,
+                    PrivateAccountId: "1",
+                    mapping)));
+
+            Assert.Empty(Directory.EnumerateFileSystemEntries(testDirectory));
+        }
+        finally
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CancellationLeavesNoDatabaseArtifact()
+    {
+        string testDirectory = CreateTestDirectory();
+
+        try
+        {
+            string databasePath = Path.Combine(testDirectory, "starlight.db");
+            StarlightMappingResult mapping = await CreateMappingAsync();
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                StarlightDatabaseWriter.WriteNewAsync(
+                    new StarlightDatabaseWriteRequest(
+                        databasePath,
+                        PlayerUid: 765432100,
+                        PrivateAccountId: "1",
+                        mapping),
+                    cancellation.Token));
+
+            Assert.Empty(Directory.EnumerateFileSystemEntries(testDirectory));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
     private static async Task<StarlightMappingResult> CreateMappingAsync()
     {
         OfficialSnapshot snapshot = await OfficialSnapshotSerializer.ReadAsync(FixturePath("minimal-valid.json"));

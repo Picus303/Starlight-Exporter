@@ -1,0 +1,27 @@
+name: Offline validation
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  offline:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore exporter
+        run: dotnet restore StarlightExporter.slnx
+
+      - name: Restore pinned Starlight server
+        run: dotnet restore vendor/Starlight/Source/Starlight/Starlight.csproj
+
+      - name: Verify offline pipeline
+        shell: pwsh
+        run: ./scripts/verify-offline.ps1 -SkipRealResources -SkipRestore

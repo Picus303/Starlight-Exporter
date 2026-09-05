@@ -233,6 +233,25 @@ public sealed class CliApplicationTests
         Assert.Contains("Only '--uid-mode preserve' is implemented", error.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task CancellationReturnsStableErrorWithoutPublishingOutput()
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        int exitCode = await CliApplication.RunAsync(
+            ["inspect", FixturePath("minimal-valid.json")],
+            output,
+            error,
+            cancellation.Token);
+
+        Assert.Equal(CliApplication.UnexpectedError, exitCode);
+        Assert.Contains("Operation cancelled", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, output.ToString());
+    }
+
     private static string FixturePath(string fileName) =>
         Path.Combine(AppContext.BaseDirectory, "Fixtures", fileName);
 
