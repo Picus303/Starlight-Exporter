@@ -3,8 +3,8 @@ using Starlight.Game.Player;
 using Starlight.Game.Resources;
 using Starlight.Protocol;
 using Starlight.Rpc.Proto;
-using StarlightExporter.Mapping;
 using StarlightExporter.Snapshot;
+using StarlightExporter.StarlightTarget;
 using Xunit;
 
 namespace StarlightExporter.Tests;

@@ -1,9 +1,7 @@
 using System.Text.Json;
-using Microsoft.Extensions.Configuration;
-using Starlight.Game.Resources;
-using StarlightExporter.Mapping;
 using StarlightExporter.Persistence;
 using StarlightExporter.Snapshot;
+using StarlightExporter.StarlightTarget;
 
 namespace StarlightExporter.Cli;
 
@@ -79,8 +77,7 @@ public static class CliApplication
         }
 
         await output.WriteLineAsync($"Snapshot schema: {snapshot.Manifest.SchemaVersion}");
-        await output.WriteLineAsync($"Starlight commit: {snapshot.Manifest.StarlightCommit}");
-        await output.WriteLineAsync($"Protocol: {snapshot.Manifest.ProtocolVersion}");
+        await output.WriteLineAsync($"Source protocol: {snapshot.Manifest.SourceProtocolVersion}");
         await output.WriteLineAsync($"Official UID: {snapshot.Manifest.OfficialUid}");
         await output.WriteLineAsync($"Region: {snapshot.Manifest.Region}");
         await output.WriteLineAsync($"Captured at: {snapshot.Manifest.CapturedAtUtc:O}");
@@ -101,10 +98,13 @@ public static class CliApplication
             return InvalidResources;
         }
 
-        GameData gameData;
+        StarlightTargetPreflightResult preflight;
         try
         {
-            gameData = await LoadGameDataAsync(options.ResourcesPath, cancellationToken);
+            preflight = await StarlightTargetPreflight.RunAsync(
+                snapshot,
+                options.ResourcesPath,
+                cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -112,7 +112,7 @@ public static class CliApplication
             return InvalidResources;
         }
 
-        StarlightMappingResult mapping = new StarlightSnapshotMapper(gameData).Map(snapshot);
+        StarlightMappingResult mapping = preflight.Mapping;
         await WriteMappingIssuesAsync(mapping.Issues, error);
         await output.WriteLineAsync(
             $"Mapped: {mapping.State.Materials.Count} materials, {mapping.State.Weapons.Count} weapons, "
@@ -124,13 +124,8 @@ public static class CliApplication
             return InvalidMapping;
         }
 
-        StarlightModuleValidationResult moduleValidation =
-            await StarlightModuleCompatibilityValidator.ValidateAsync(
-                snapshot.Manifest.OfficialUid,
-                gameData,
-                mapping.Profile,
-                mapping.State,
-                cancellationToken);
+        StarlightModuleValidationResult moduleValidation = preflight.ModuleValidation
+            ?? throw new InvalidOperationException("Module validation did not run for a successful mapping.");
         await WriteModuleDiagnosticsAsync(moduleValidation.Diagnostics, error);
         if (!moduleValidation.IsCompatible)
         {
@@ -193,10 +188,13 @@ public static class CliApplication
             return InvalidSnapshot;
         }
 
-        GameData gameData;
+        StarlightTargetPreflightResult preflight;
         try
         {
-            gameData = await LoadGameDataAsync(options.ResourcesPath, cancellationToken);
+            preflight = await StarlightTargetPreflight.RunAsync(
+                snapshot,
+                options.ResourcesPath,
+                cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -204,7 +202,7 @@ public static class CliApplication
             return InvalidResources;
         }
 
-        StarlightMappingResult mapping = new StarlightSnapshotMapper(gameData).Map(snapshot);
+        StarlightMappingResult mapping = preflight.Mapping;
         await WriteMappingIssuesAsync(mapping.Issues, error);
 
         if (!SatisfiesMappingPolicy(mapping, options.Strict))
@@ -213,13 +211,8 @@ public static class CliApplication
             return InvalidMapping;
         }
 
-        StarlightModuleValidationResult moduleValidation =
-            await StarlightModuleCompatibilityValidator.ValidateAsync(
-                snapshot.Manifest.OfficialUid,
-                gameData,
-                mapping.Profile,
-                mapping.State,
-                cancellationToken);
+        StarlightModuleValidationResult moduleValidation = preflight.ModuleValidation
+            ?? throw new InvalidOperationException("Module validation did not run for a successful mapping.");
         await WriteModuleDiagnosticsAsync(moduleValidation.Diagnostics, error);
         if (!moduleValidation.IsCompatible)
         {
@@ -234,6 +227,7 @@ public static class CliApplication
                 snapshot,
                 mapping,
                 moduleValidation,
+                preflight.ResourcesRevision,
                 cancellationToken);
             await output.WriteLineAsync($"Database written: {Path.Combine(options.OutputDirectory, "starlight.db")}");
             await output.WriteLineAsync($"Import report written: {Path.Combine(options.OutputDirectory, "import-report.json")}");
@@ -254,6 +248,7 @@ public static class CliApplication
         OfficialSnapshot snapshot,
         StarlightMappingResult mapping,
         StarlightModuleValidationResult moduleValidation,
+        string? resourcesRevision,
         CancellationToken cancellationToken)
     {
         string outputParent = Path.GetDirectoryName(options.OutputDirectory)
@@ -271,10 +266,16 @@ public static class CliApplication
                     Path.Combine(temporaryDirectory, "starlight.db"),
                     snapshot.Manifest.OfficialUid,
                     options.PrivateAccountId,
-                    mapping),
+                    mapping.Profile,
+                    mapping.State),
                 cancellationToken);
 
-            ImportReport report = ImportReport.Create(snapshot, mapping, result, moduleValidation);
+            ImportReport report = ImportReport.Create(
+                snapshot,
+                mapping,
+                result,
+                moduleValidation,
+                resourcesRevision);
             await ImportReportWriter.WriteAsync(
                 Path.Combine(temporaryDirectory, "import-report.json"),
                 report,
@@ -423,20 +424,6 @@ public static class CliApplication
             resources is null ? null : Path.GetFullPath(resources),
             strict);
         return true;
-    }
-
-    private static async Task<GameData> LoadGameDataAsync(
-        string resourcesPath,
-        CancellationToken cancellationToken)
-    {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> {
-                ["Game:ResourcesPath"] = resourcesPath
-            })
-            .Build();
-        var gameData = new GameData(configuration);
-        await gameData.StartAsync(cancellationToken);
-        return gameData;
     }
 
     private static async Task WriteMappingIssuesAsync(

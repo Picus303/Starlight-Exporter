@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../src/StarlightExporter.Snapshot/StarlightExporter.Snapshot.csproj" />
+    <ProjectReference Include="../../src/StarlightExporter.StarlightTarget/StarlightExporter.StarlightTarget.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../TestSupport/TestGameData.cs" Link="TestSupport/TestGameData.cs" />
+  </ItemGroup>
+</Project>

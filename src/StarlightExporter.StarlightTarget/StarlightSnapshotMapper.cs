@@ -2,13 +2,10 @@ using Starlight.Game.Resources;
 using Starlight.Rpc.Proto;
 using StarlightExporter.Snapshot;
 
-namespace StarlightExporter.Mapping;
+namespace StarlightExporter.StarlightTarget;
 
 public sealed class StarlightSnapshotMapper(GameData gameData)
 {
-    private const int MaterialCountLimit = 2000;
-    private const uint MaxTeamCount = 4;
-    private const int WeaponCountLimit = 2000;
 
     public StarlightMappingResult Map(OfficialSnapshot snapshot)
     {
@@ -80,7 +77,7 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
                 continue;
             }
 
-            if (state.Materials.Count >= MaterialCountLimit)
+            if (state.Materials.Count >= StarlightTargetPolicy.MaterialCountLimit)
             {
                 excludedByLimit++;
                 continue;
@@ -106,7 +103,7 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
         {
             issues.Add(Warning(
                 "MATERIAL_LIMIT_REACHED",
-                $"{excludedByLimit} material stack(s) were excluded because Starlight accepts at most {MaterialCountLimit}."));
+                $"{excludedByLimit} material stack(s) were excluded because Starlight accepts at most {StarlightTargetPolicy.MaterialCountLimit}."));
         }
     }
 
@@ -128,13 +125,13 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
                 continue;
             }
 
-            if (state.Weapons.Count >= WeaponCountLimit)
+            if (state.Weapons.Count >= StarlightTargetPolicy.WeaponCountLimit)
             {
                 excludedByLimit++;
                 continue;
             }
 
-            (uint minimumPromotion, uint maximumPromotion) = PromotionRangeFor(source.Level);
+            (uint minimumPromotion, uint maximumPromotion) = StarlightTargetPolicy.PromotionRangeFor(source.Level);
             uint promoteLevel = Math.Clamp(source.PromoteLevel, minimumPromotion, maximumPromotion);
             if (promoteLevel != source.PromoteLevel)
             {
@@ -180,7 +177,7 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
         {
             issues.Add(Warning(
                 "WEAPON_LIMIT_REACHED",
-                $"{excludedByLimit} weapon(s) were excluded because Starlight accepts at most {WeaponCountLimit}."));
+                $"{excludedByLimit} weapon(s) were excluded because Starlight accepts at most {StarlightTargetPolicy.WeaponCountLimit}."));
         }
 
         return mappedGuids;
@@ -196,7 +193,7 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
 
         foreach (SnapshotAvatar source in avatars.OrderBy(avatar => avatar.AvatarId))
         {
-            if (!CanCreateAvatar(source.AvatarId))
+            if (!StarlightTargetPolicy.CanCreateAvatar(gameData, source.AvatarId))
             {
                 issues.Add(Warning(
                     "UNSUPPORTED_AVATAR",
@@ -212,25 +209,12 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
                 continue;
             }
 
-            uint bornTime;
-            if (source.BornTime is < 0 or > uint.MaxValue)
-            {
-                bornTime = 0;
-                issues.Add(Warning(
-                    "BORN_TIME_INVALID",
-                    $"Avatar {source.AvatarId} born time is outside the supported UInt32 range and was reset to zero."));
-            }
-            else
-            {
-                bornTime = (uint)source.BornTime;
-            }
-
             state.Avatars.Add(new NetAvatar {
                 AvatarId = source.AvatarId,
                 Guid = source.Guid,
                 Level = source.Level,
                 Constellation = source.Constellation,
-                BornTime = bornTime,
+                BornTime = (uint)source.BornTime,
                 WeaponGuid = source.WeaponGuid
             });
             mappedGuids.Add(source.Guid);
@@ -249,7 +233,7 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
         Dictionary<uint, SnapshotTeam> sourceTeams = teams.ToDictionary(team => team.TeamId);
         bool completedSlots = false;
 
-        for (uint teamId = 1; teamId <= MaxTeamCount; teamId++)
+        for (uint teamId = 1; teamId <= StarlightTargetPolicy.MaxTeamCount; teamId++)
         {
             if (!sourceTeams.TryGetValue(teamId, out SnapshotTeam? source))
             {
@@ -310,40 +294,18 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
         }
     }
 
-    private bool CanCreateAvatar(uint avatarId) =>
-        gameData.AvatarData.TryGetValue(avatarId, out var avatar)
-        && gameData.AvatarSkillDepotData.ContainsKey(avatar.SkillDepotId)
-        && gameData.WeaponData.ContainsKey(avatar.InitialWeapon)
-        && gameData.Avatars.ContainsKey(avatarId);
-
-    private static (uint Minimum, uint Maximum) PromotionRangeFor(uint level) => level switch {
-        < 20 => (0, 0),
-        20 => (0, 1),
-        < 40 => (1, 1),
-        40 => (1, 2),
-        < 50 => (2, 2),
-        50 => (2, 3),
-        < 60 => (3, 3),
-        60 => (3, 4),
-        < 70 => (4, 4),
-        70 => (4, 5),
-        < 80 => (5, 5),
-        80 => (5, 6),
-        _ => (6, 6)
-    };
-
     private static void ValidateMappedState(NetPlayerState state, List<MappingIssue> issues)
     {
-        bool invalid = state.Materials.Count > MaterialCountLimit
+        bool invalid = state.Materials.Count > StarlightTargetPolicy.MaterialCountLimit
             || state.Materials.Any(item => item.ItemId == 0 || item.Guid == 0 || item.Count == 0)
-            || state.Weapons.Count > WeaponCountLimit
+            || state.Weapons.Count > StarlightTargetPolicy.WeaponCountLimit
             || state.Weapons.Any(item => item.ItemId == 0 || item.Guid == 0)
             || state.Avatars.Any(avatar => avatar.AvatarId == 0
                 || avatar.Guid == 0
                 || state.Weapons.All(weapon => weapon.Guid != avatar.WeaponGuid))
-            || state.AvatarTeams.Count != MaxTeamCount
-            || state.AvatarTeams.Select(team => team.TeamId).Distinct().Count() != MaxTeamCount
-            || state.AvatarTeams.Any(team => team.TeamId is < 1 or > MaxTeamCount
+            || state.AvatarTeams.Count != StarlightTargetPolicy.MaxTeamCount
+            || state.AvatarTeams.Select(team => team.TeamId).Distinct().Count() != StarlightTargetPolicy.MaxTeamCount
+            || state.AvatarTeams.Any(team => team.TeamId is < 1 or > StarlightTargetPolicy.MaxTeamCount
                 || team.AvatarGuids.Any(guid => state.Avatars.All(avatar => avatar.Guid != guid))
                 || team.AvatarGuids.Count > 0 && !team.AvatarGuids.Contains(team.CurrentAvatarGuid))
             || state.AvatarTeams.All(team => team.TeamId != state.CurrentAvatarTeamId

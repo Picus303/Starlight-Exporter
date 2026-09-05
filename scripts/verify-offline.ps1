@@ -10,8 +10,11 @@ $ErrorActionPreference = "Stop"
 $env:MSBUILDDISABLENODEREUSE = "1"
 
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-$expectedStarlightCommit = "c1cd286c4909d31d355006899c5905ef6adf9741"
-$expectedProtocolCommit = "69d498bebad8945dc3005f87c8afdcf87d026884"
+$targetLock = Get-Content -LiteralPath (Join-Path $repositoryRoot "starlight-target.lock.json") `
+    -Raw -Encoding UTF8 | ConvertFrom-Json
+$expectedStarlightCommit = $targetLock.starlightCommit
+$expectedProtocolCommit = $targetLock.protocolCommit
+$previousTestResources = $env:STARLIGHT_EXPORTER_TEST_RESOURCES
 
 function Invoke-Checked([string] $Label, [scriptblock] $Command) {
     Write-Host "==> $Label"
@@ -49,16 +52,18 @@ try {
     Invoke-Checked "Exporter formatting" {
         dotnet format whitespace StarlightExporter.slnx --include src tests --no-restore --verify-no-changes
     }
-    Invoke-Checked "Exporter Release build" {
-        dotnet build StarlightExporter.slnx --configuration Release --no-restore
-    }
     Invoke-Checked "Pinned Starlight server Release build" {
         dotnet build vendor/Starlight/Source/Starlight/Starlight.csproj `
             --configuration Release `
             --no-restore
     }
-    Invoke-Checked "Exporter Release tests" {
-        dotnet test StarlightExporter.slnx --configuration Release --no-build --no-restore
+    Invoke-Checked "Exporter Release build" {
+        dotnet build src/StarlightExporter.Cli/StarlightExporter.Cli.csproj `
+            --configuration Release --no-restore
+    }
+    Invoke-Checked "Exporter unit tests" {
+        dotnet test tests/StarlightExporter.UnitTests/StarlightExporter.UnitTests.csproj `
+            --configuration Release --no-restore
     }
 
     if (-not $SkipRealResources) {
@@ -88,6 +93,7 @@ try {
             throw "Prepared-resource SHA256 mismatch: expected $($resourceMetadata.preparedSha256), got $resourceHash."
         }
         Write-Host "Resources revision: $($resourceMetadata.revision); SHA256: $resourceHash"
+        $env:STARLIGHT_EXPORTER_TEST_RESOURCES = $resolvedResources
 
         Invoke-Checked "Real-resource module preflight" {
             dotnet run --project src/StarlightExporter.Cli `
@@ -97,8 +103,21 @@ try {
         }
     }
 
+    Invoke-Checked "Starlight module and database compatibility tests" {
+        dotnet test tests/StarlightExporter.StarlightCompatibilityTests/StarlightExporter.StarlightCompatibilityTests.csproj `
+            --configuration Release --no-restore
+    }
+
+    if (-not $SkipRealResources) {
+        Invoke-Checked "Pinned Starlight server smoke test" {
+            dotnet test tests/StarlightExporter.ServerSmokeTests/StarlightExporter.ServerSmokeTests.csproj `
+                --configuration Release --no-restore
+        }
+    }
+
     Write-Host "Offline verification passed."
 }
 finally {
+    $env:STARLIGHT_EXPORTER_TEST_RESOURCES = $previousTestResources
     Pop-Location
 }

@@ -6,14 +6,12 @@ using System.Text.Json;
 using Google.Protobuf;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Starlight.DbGate;
 using Starlight.DbGate.Models;
-using Starlight.Game.Resources;
 using Starlight.Rpc.Proto;
-using StarlightExporter.Mapping;
 using StarlightExporter.Persistence;
 using StarlightExporter.Snapshot;
+using StarlightExporter.StarlightTarget;
 using Xunit;
 
 namespace StarlightExporter.Tests;
@@ -46,25 +44,23 @@ public sealed class SyntheticServerSmokeTests
                 accountId: 42,
                 SyntheticUsername,
                 SyntheticPassword);
-            GameData gameData = await LoadGameDataAsync(resourcesPath);
             OfficialSnapshot snapshot = await OfficialSnapshotSerializer.ReadAsync(
                 Path.Combine(AppContext.BaseDirectory, "Fixtures", "smoke-real-resources.json"));
-            StarlightMappingResult mapping = new StarlightSnapshotMapper(gameData).Map(snapshot);
+            StarlightTargetPreflightResult preflight = await StarlightTargetPreflight.RunAsync(
+                snapshot,
+                resourcesPath);
+            StarlightMappingResult mapping = preflight.Mapping;
             Assert.True(mapping.IsSuccess, string.Join(Environment.NewLine, mapping.Issues));
-
-            StarlightModuleValidationResult moduleValidation =
-                await StarlightModuleCompatibilityValidator.ValidateAsync(
-                    snapshot.Manifest.OfficialUid,
-                    gameData,
-                    mapping.Profile,
-                    mapping.State);
+            StarlightModuleValidationResult moduleValidation = Assert.IsType<StarlightModuleValidationResult>(
+                preflight.ModuleValidation);
             Assert.True(moduleValidation.IsCompatible, string.Join(Environment.NewLine, moduleValidation.Diagnostics));
 
             await StarlightDatabaseWriter.WriteNewAsync(new StarlightDatabaseWriteRequest(
                 playerDatabasePath,
                 snapshot.Manifest.OfficialUid,
                 PrivateAccountId: "42",
-                mapping));
+                mapping.Profile,
+                mapping.State));
 
             int sdkPort = ReserveTcpPort();
             int gatePort = ReserveUdpPort();
@@ -110,18 +106,6 @@ public sealed class SyntheticServerSmokeTests
             SqliteConnection.ClearAllPools();
             Directory.Delete(testDirectory, recursive: true);
         }
-    }
-
-    private static async Task<GameData> LoadGameDataAsync(string resourcesPath)
-    {
-        IConfiguration configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> {
-                ["Game:ResourcesPath"] = resourcesPath
-            })
-            .Build();
-        var gameData = new GameData(configuration);
-        await gameData.StartAsync(CancellationToken.None);
-        return gameData;
     }
 
     private static Process StartServer(

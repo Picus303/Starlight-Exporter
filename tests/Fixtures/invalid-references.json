@@ -1,8 +1,7 @@
 {
   "manifest": {
-    "schemaVersion": 1,
-    "starlightCommit": "c1cd286c4909d31d355006899c5905ef6adf9741",
-    "protocolVersion": "V70",
+    "schemaVersion": 2,
+    "sourceProtocolVersion": "V70",
     "capturedAtUtc": "2026-09-04T10:00:00Z",
     "region": "test",
     "officialUid": 765432100
@@ -35,4 +34,3 @@
   ],
   "unsupported": []
 }
-

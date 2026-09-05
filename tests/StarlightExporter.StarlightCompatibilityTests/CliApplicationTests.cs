@@ -1,8 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Configuration;
-using Starlight.Game.Resources;
 using StarlightExporter.Cli;
+using StarlightExporter.StarlightTarget;
 using Xunit;
 
 namespace StarlightExporter.Tests;
@@ -50,6 +49,15 @@ public sealed class CliApplicationTests
             string reportJson = await File.ReadAllTextAsync(reportPath);
             using JsonDocument report = JsonDocument.Parse(reportJson);
             Assert.Equal("success-with-warnings", report.RootElement.GetProperty("result").GetString());
+            Assert.Equal(expected: 2, report.RootElement.GetProperty("sourceSnapshotSchemaVersion").GetInt32());
+            Assert.Equal("V70", report.RootElement.GetProperty("sourceProtocolVersion").GetString());
+            Assert.Equal(
+                StarlightTargetMetadata.Current.StarlightCommit,
+                report.RootElement.GetProperty("targetStarlightCommit").GetString());
+            Assert.Equal(
+                StarlightTargetMetadata.Current.ProtocolCommit,
+                report.RootElement.GetProperty("targetProtocolCommit").GetString());
+            Assert.Equal(JsonValueKind.Null, report.RootElement.GetProperty("targetResourcesRevision").ValueKind);
             Assert.Equal(expected: 765432100u, report.RootElement.GetProperty("privateUid").GetUInt32());
             Assert.Equal("1", report.RootElement.GetProperty("privateAccountId").GetString());
             Assert.Equal(expected: 4, report.RootElement.GetProperty("imported").GetProperty("teams").GetInt32());
@@ -132,20 +140,14 @@ public sealed class CliApplicationTests
     {
         string archivePath = RealResourceArchive.Find()!;
 
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> {
-                ["Game:ResourcesPath"] = archivePath
-            })
-            .Build();
-        var gameData = new GameData(configuration);
+        LoadedStarlightGameData loaded = await StarlightGameDataLoader.LoadAsync(archivePath);
 
-        await gameData.StartAsync(CancellationToken.None);
-
-        Assert.True(gameData.MaterialData.Count > 100);
-        Assert.True(gameData.WeaponData.Count > 100);
-        Assert.True(gameData.AvatarData.Count > 50);
-        Assert.Contains(expected: 11101u, gameData.WeaponData.Keys);
-        Assert.Contains(expected: 10000005u, gameData.AvatarData.Keys);
+        Assert.True(loaded.Data.MaterialData.Count > 100);
+        Assert.True(loaded.Data.WeaponData.Count > 100);
+        Assert.True(loaded.Data.AvatarData.Count > 50);
+        Assert.Contains(expected: 11101u, loaded.Data.WeaponData.Keys);
+        Assert.Contains(expected: 10000005u, loaded.Data.AvatarData.Keys);
+        Assert.Equal("8d7ee68210c5b9a8375db80b858b186a6f6d3731", loaded.ResourcesRevision);
     }
 
     [Fact]
@@ -257,47 +259,3 @@ public sealed class CliApplicationTests
         Path.Combine(AppContext.BaseDirectory, "Fixtures", fileName);
 
 }
-
-internal sealed class RealResourcesFactAttribute : FactAttribute
-{
-    public RealResourcesFactAttribute()
-    {
-        if (RealResourceArchive.Find() is null)
-        {
-            Skip = "Set STARLIGHT_EXPORTER_TEST_RESOURCES or run scripts/prepare-resources.ps1 to enable this integration test.";
-        }
-    }
-}
-
-internal static class RealResourceArchive
-{
-    public static string? Find()
-    {
-        string? configuredPath = Environment.GetEnvironmentVariable("STARLIGHT_EXPORTER_TEST_RESOURCES");
-        if (!string.IsNullOrWhiteSpace(configuredPath))
-        {
-            string fullPath = Path.GetFullPath(configuredPath);
-            return File.Exists(fullPath) ? fullPath : null;
-        }
-
-        string? repositoryRoot = FindRepositoryRoot();
-        string archivePath = repositoryRoot is null
-            ? string.Empty
-            : Path.Combine(repositoryRoot, ".local", "resources", "resources.zip");
-        return File.Exists(archivePath) ? archivePath : null;
-    }
-
-    internal static string? FindRepositoryRoot()
-    {
-        DirectoryInfo? directory = new(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "StarlightExporter.slnx")))
-        {
-            directory = directory.Parent;
-        }
-
-        return directory?.FullName;
-    }
-}
-
-[CollectionDefinition("Real resources", DisableParallelization = true)]
-public sealed class RealResourceSerialGroup;

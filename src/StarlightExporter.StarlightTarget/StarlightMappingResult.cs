@@ -1,6 +1,6 @@
 using Starlight.Rpc.Proto;
 
-namespace StarlightExporter.Mapping;
+namespace StarlightExporter.StarlightTarget;
 
 public enum MappingIssueSeverity
 {

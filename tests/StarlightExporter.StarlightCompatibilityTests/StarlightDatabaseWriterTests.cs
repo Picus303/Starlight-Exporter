@@ -7,9 +7,9 @@ using Starlight.Game.Player;
 using Starlight.Game.Resources;
 using Starlight.Protocol;
 using Starlight.Rpc.Proto;
-using StarlightExporter.Mapping;
 using StarlightExporter.Persistence;
 using StarlightExporter.Snapshot;
+using StarlightExporter.StarlightTarget;
 using Xunit;
 
 namespace StarlightExporter.Tests;
@@ -34,7 +34,8 @@ public sealed class StarlightDatabaseWriterTests
                     databasePath,
                     snapshot.Manifest.OfficialUid,
                     PrivateAccountId: "1",
-                    mapping));
+                    mapping.Profile,
+                    mapping.State));
 
             Assert.Equal(Path.GetFullPath(databasePath), result.OutputPath);
             Assert.Equal(snapshot.Manifest.OfficialUid, result.PlayerUid);
@@ -83,7 +84,8 @@ public sealed class StarlightDatabaseWriterTests
                     databasePath,
                     PlayerUid: 765432100,
                     PrivateAccountId: "1",
-                    mapping)));
+                    mapping.Profile,
+                    mapping.State)));
 
             Assert.Contains("already exists", error.Message, StringComparison.Ordinal);
             Assert.Equal("existing", await File.ReadAllTextAsync(databasePath));
@@ -95,7 +97,7 @@ public sealed class StarlightDatabaseWriterTests
     }
 
     [Fact]
-    public async Task MappingErrorsAreRejectedBeforeCreatingAFile()
+    public async Task NullStateIsRejectedBeforeCreatingAFile()
     {
         string testDirectory = CreateTestDirectory();
 
@@ -103,19 +105,14 @@ public sealed class StarlightDatabaseWriterTests
         {
             string databasePath = Path.Combine(testDirectory, "starlight.db");
             StarlightMappingResult valid = await CreateMappingAsync();
-            StarlightMappingResult invalid = valid with {
-                Issues = [
-                    .. valid.Issues,
-                    new MappingIssue(MappingIssueSeverity.Error, "TEST_ERROR", "Synthetic fatal issue.")
-                ]
-            };
 
-            await Assert.ThrowsAsync<ArgumentException>(() =>
+            await Assert.ThrowsAsync<ArgumentNullException>(() =>
                 StarlightDatabaseWriter.WriteNewAsync(new StarlightDatabaseWriteRequest(
                     databasePath,
                     PlayerUid: 765432100,
                     PrivateAccountId: "1",
-                    invalid)));
+                    valid.Profile,
+                    State: null!)));
 
             Assert.False(File.Exists(databasePath));
             Assert.Empty(Directory.EnumerateFiles(testDirectory));
@@ -141,7 +138,8 @@ public sealed class StarlightDatabaseWriterTests
                     databasePath,
                     PlayerUid: 0,
                     PrivateAccountId: "1",
-                    mapping)));
+                    mapping.Profile,
+                    mapping.State)));
 
             Assert.Empty(Directory.EnumerateFileSystemEntries(testDirectory));
         }
@@ -169,7 +167,8 @@ public sealed class StarlightDatabaseWriterTests
                         databasePath,
                         PlayerUid: 765432100,
                         PrivateAccountId: "1",
-                        mapping),
+                        mapping.Profile,
+                        mapping.State),
                     cancellation.Token));
 
             Assert.Empty(Directory.EnumerateFileSystemEntries(testDirectory));

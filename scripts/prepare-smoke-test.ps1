@@ -81,6 +81,18 @@ try {
     if ($report.result -notlike "success*" -or -not $report.moduleValidation.isCompatible) {
         throw "The generated import report does not describe a module-compatible success."
     }
+    $targetLock = Get-Content -LiteralPath (Join-Path $repositoryRoot "starlight-target.lock.json") `
+        -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not [string]::Equals(
+            $report.targetStarlightCommit,
+            $targetLock.starlightCommit,
+            [StringComparison]::Ordinal) `
+        -or -not [string]::Equals(
+            $report.targetProtocolCommit,
+            $targetLock.protocolCommit,
+            [StringComparison]::Ordinal)) {
+        throw "The import report target does not match starlight-target.lock.json."
+    }
 
     Write-Host "Smoke-test package ready: '$resolvedOutput'."
     Write-Host "Player UID: $($report.privateUid); private account ID: $($report.privateAccountId)."

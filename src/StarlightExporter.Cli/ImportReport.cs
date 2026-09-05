@@ -1,16 +1,20 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using StarlightExporter.Mapping;
 using StarlightExporter.Persistence;
 using StarlightExporter.Snapshot;
+using StarlightExporter.StarlightTarget;
 
 namespace StarlightExporter.Cli;
 
 public sealed record ImportReport(
     int SchemaVersion,
     string Result,
-    string StarlightCommit,
-    string ProtocolVersion,
+    int SourceSnapshotSchemaVersion,
+    string SourceProtocolVersion,
+    string TargetStarlightCommit,
+    string TargetProtocolCommit,
+    string TargetProtocolVersion,
+    string? TargetResourcesRevision,
     DateTimeOffset ImportedAtUtc,
     uint OfficialUid,
     uint PrivateUid,
@@ -25,18 +29,24 @@ public sealed record ImportReport(
         OfficialSnapshot snapshot,
         StarlightMappingResult mapping,
         StarlightDatabaseWriteResult persisted,
-        StarlightModuleValidationResult moduleValidation)
+        StarlightModuleValidationResult moduleValidation,
+        string? resourcesRevision)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(mapping);
         ArgumentNullException.ThrowIfNull(persisted);
         ArgumentNullException.ThrowIfNull(moduleValidation);
 
+        StarlightTargetMetadata target = StarlightTargetMetadata.Current;
         return new ImportReport(
-            SchemaVersion: 1,
+            SchemaVersion: 2,
             Result: mapping.Issues.Count == 0 ? "success" : "success-with-warnings",
-            snapshot.Manifest.StarlightCommit,
-            snapshot.Manifest.ProtocolVersion,
+            snapshot.Manifest.SchemaVersion,
+            snapshot.Manifest.SourceProtocolVersion,
+            target.StarlightCommit,
+            target.ProtocolCommit,
+            target.ProtocolVersion,
+            resourcesRevision,
             DateTimeOffset.UtcNow,
             snapshot.Manifest.OfficialUid,
             persisted.PlayerUid,

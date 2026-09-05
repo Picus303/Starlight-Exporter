@@ -1,6 +1,5 @@
 using Google.Protobuf;
 using Microsoft.Extensions.DependencyInjection;
-using System.Text.Json;
 using Starlight.Common;
 using Starlight.Game.Modules;
 using Starlight.Game.Player;
@@ -10,7 +9,7 @@ using Starlight.Rpc.Proto;
 using Starlight.Rpc.Tunnel;
 using IMessage = Starlight.Protobuf.Core.IMessage;
 
-namespace StarlightExporter.Mapping;
+namespace StarlightExporter.StarlightTarget;
 
 public sealed record ModuleValidationCounts(
     int Materials,
@@ -110,7 +109,7 @@ public static class StarlightModuleCompatibilityValidator
             {
                 diagnostics.Add(new ModuleValidationDiagnostic(
                     "PLAYER_STORE_NOTIFY_MISMATCH",
-                    "PlayerStoreNotify does not exactly describe the inventory loaded by Starlight."));
+                    "PlayerStoreNotify does not describe the imported inventory loaded by Starlight."));
             }
 
             bool avatarNotificationMatches = AvatarNotificationMatches(avatarNotification, avatars, teams);
@@ -118,11 +117,11 @@ public static class StarlightModuleCompatibilityValidator
             {
                 diagnostics.Add(new ModuleValidationDiagnostic(
                     "AVATAR_DATA_NOTIFY_MISMATCH",
-                    "AvatarDataNotify does not exactly describe the avatars and teams loaded by Starlight."));
+                    "AvatarDataNotify does not describe the imported avatars and teams loaded by Starlight."));
             }
 
             string[] repairNotifications = tunnel.Sent
-                .Where(message => message is not StoreWeightLimitNotify and not PlayerStoreNotify)
+                .Where(message => message is StoreItemChangeNotify or AvatarEquipChangeNotify)
                 .Select(message => message.GetType().Name)
                 .Distinct(StringComparer.Ordinal)
                 .Order(StringComparer.Ordinal)
@@ -165,16 +164,24 @@ public static class StarlightModuleCompatibilityValidator
 
     private static bool StoreNotificationMatches(PlayerStoreNotify notification, InventoryModule inventory)
     {
-        var expected = new PlayerStoreNotify {
-            StoreType = StoreType.STORE_TYPE_PACK,
-            WeightLimit = 30000,
-            ItemList = [
-                .. inventory.Materials.Select(item => item.ToProtocol()),
-                .. inventory.Weapons.Select(item => item.ToProtocol())
-            ]
-        };
+        if (notification.StoreType != StoreType.STORE_TYPE_PACK)
+        {
+            return false;
+        }
 
-        return ProtocolMessagesMatch(expected, notification);
+        Item[] expected = [
+            .. inventory.Materials.Select(item => item.ToProtocol()),
+            .. inventory.Weapons.Select(item => item.ToProtocol())
+        ];
+        if (notification.ItemList.Count != expected.Length)
+        {
+            return false;
+        }
+
+        Dictionary<ulong, Item> actualByGuid = notification.ItemList.ToDictionary(item => item.Guid);
+        return expected.All(item =>
+            actualByGuid.TryGetValue(item.Guid, out Item? actual)
+            && InventoryItemMatches(item, actual));
     }
 
     private static bool AvatarNotificationMatches(
@@ -191,22 +198,49 @@ public static class StarlightModuleCompatibilityValidator
             return false;
         }
 
-        var expected = new AvatarDataNotify {
-            CurAvatarTeamId = current.Id,
-            ChooseAvatarGuid = current.CurrentAvatarGuid,
-            OwnedFlycloakList = [Avatar.DefaultFlycloak],
-            AvatarList = [.. loadedAvatars.Values.Select(avatar => avatar.Info())]
-        };
-        foreach ((uint id, PlayerTeam team) in loadedTeams)
+        if (notification.CurAvatarTeamId != current.Id
+            || notification.ChooseAvatarGuid != current.CurrentAvatarGuid
+            || !notification.OwnedFlycloakList.Contains(Avatar.DefaultFlycloak)
+            || notification.AvatarList.Count != loadedAvatars.Count
+            || notification.AvatarTeamMap.Count != loadedTeams.Count)
         {
-            expected.AvatarTeamMap.Add(id, team.Info());
+            return false;
         }
 
-        return ProtocolMessagesMatch(expected, notification);
+        bool avatarsMatch = loadedAvatars.Values.All(avatar =>
+            notification.AvatarList.Any(info =>
+                info.AvatarId == avatar.AvatarId
+                && info.Guid == avatar.Guid
+                && info.BornTime == avatar.BornTime
+                && info.CoreProudSkillLevel == avatar.Constellation
+                && info.EquipGuidList.Contains(avatar.WeaponGuid)));
+        bool teamsMatch = loadedTeams.All(pair =>
+            notification.AvatarTeamMap.TryGetValue(pair.Key, out AvatarTeam? actual)
+            && actual.TeamName == pair.Value.Name
+            && actual.AvatarGuidList.SequenceEqual(pair.Value.Avatars.Select(avatar => avatar.Guid)));
+        return avatarsMatch && teamsMatch;
     }
 
-    private static bool ProtocolMessagesMatch<T>(T expected, T actual) =>
-        JsonSerializer.Serialize(expected) == JsonSerializer.Serialize(actual);
+    private static bool InventoryItemMatches(Item expected, Item actual) =>
+        expected.ItemId == actual.ItemId
+        && expected.Guid == actual.Guid
+        && expected.Material?.Count == actual.Material?.Count
+        && expected.Equip?.Weapon?.Level == actual.Equip?.Weapon?.Level
+        && expected.Equip?.Weapon?.PromoteLevel == actual.Equip?.Weapon?.PromoteLevel
+        && MapsMatch(expected.Equip?.Weapon?.AffixMap, actual.Equip?.Weapon?.AffixMap);
+
+    private static bool MapsMatch(
+        Dictionary<uint, uint>? expected,
+        Dictionary<uint, uint>? actual)
+    {
+        if (expected is null || actual is null)
+        {
+            return expected is null && actual is null;
+        }
+
+        return expected.Count == actual.Count
+            && expected.All(pair => actual.TryGetValue(pair.Key, out uint value) && value == pair.Value);
+    }
 
     private sealed class RecordingTunnel : RpcTunnel
     {

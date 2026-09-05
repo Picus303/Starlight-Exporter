@@ -1,6 +1,6 @@
 using Starlight.Game.Resources;
 using Starlight.Game.Resources.Excel;
-using StarlightExporter.Mapping;
+using StarlightExporter.StarlightTarget;
 using StarlightExporter.Snapshot;
 using Xunit;
 

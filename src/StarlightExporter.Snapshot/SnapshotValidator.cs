@@ -38,13 +38,12 @@ public static class SnapshotValidator
             "SCHEMA_VERSION_UNSUPPORTED",
             $"Expected schema version {SnapshotContract.CurrentSchemaVersion}, got {manifest.SchemaVersion}.",
             errors);
-        AddIf(!string.Equals(manifest.StarlightCommit, SnapshotContract.StarlightCommit, StringComparison.Ordinal),
-            "STARLIGHT_COMMIT_MISMATCH",
-            $"Expected Starlight commit {SnapshotContract.StarlightCommit}.",
-            errors);
-        AddIf(!string.Equals(manifest.ProtocolVersion, SnapshotContract.ProtocolVersion, StringComparison.Ordinal),
-            "PROTOCOL_VERSION_UNSUPPORTED",
-            $"Expected protocol {SnapshotContract.ProtocolVersion}.",
+        AddIf(!string.Equals(
+                manifest.SourceProtocolVersion,
+                SnapshotContract.SupportedSourceProtocolVersion,
+                StringComparison.Ordinal),
+            "SOURCE_PROTOCOL_VERSION_UNSUPPORTED",
+            $"Expected source protocol {SnapshotContract.SupportedSourceProtocolVersion}.",
             errors);
         AddIf(manifest.OfficialUid == 0, "UID_MISSING", "Official UID must be non-zero.", errors);
         AddIf(string.IsNullOrWhiteSpace(manifest.Region), "REGION_MISSING", "Region is required.", errors);

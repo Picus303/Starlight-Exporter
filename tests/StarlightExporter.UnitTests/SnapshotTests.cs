@@ -13,6 +13,8 @@ public sealed class SnapshotTests
         SnapshotValidationResult result = SnapshotValidator.Validate(snapshot);
 
         Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
+        Assert.Equal(SnapshotContract.CurrentSchemaVersion, snapshot.Manifest.SchemaVersion);
+        Assert.Equal(SnapshotContract.SupportedSourceProtocolVersion, snapshot.Manifest.SourceProtocolVersion);
         Assert.Equal(765432100U, snapshot.Manifest.OfficialUid);
         Assert.Single(snapshot.Materials);
         Assert.Single(snapshot.Weapons);
@@ -74,6 +76,10 @@ public sealed class SnapshotTests
             await OfficialSnapshotSerializer.WriteNewAsync(secondPath, second);
 
             Assert.Equal(await File.ReadAllBytesAsync(firstPath), await File.ReadAllBytesAsync(secondPath));
+            Assert.DoesNotContain(
+                "starlightCommit",
+                await File.ReadAllTextAsync(firstPath),
+                StringComparison.OrdinalIgnoreCase);
             OfficialSnapshot roundTripped = await OfficialSnapshotSerializer.ReadAsync(firstPath);
             Assert.Equal([1001u, 2002u], roundTripped.Materials.Select(item => item.ItemId));
             Assert.Equal(["achievement", "quest"], roundTripped.Unsupported.Select(item => item.Category));

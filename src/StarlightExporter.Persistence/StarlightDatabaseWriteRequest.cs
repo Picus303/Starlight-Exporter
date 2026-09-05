@@ -1,4 +1,4 @@
-using StarlightExporter.Mapping;
+using Starlight.Rpc.Proto;
 
 namespace StarlightExporter.Persistence;
 
@@ -6,7 +6,8 @@ public sealed record StarlightDatabaseWriteRequest(
     string OutputPath,
     uint PlayerUid,
     string PrivateAccountId,
-    StarlightMappingResult Mapping);
+    NetPlayerProfile Profile,
+    NetPlayerState State);
 
 public sealed record StarlightDatabaseWriteResult(
     string OutputPath,
@@ -16,4 +17,3 @@ public sealed record StarlightDatabaseWriteResult(
     int WeaponCount,
     int AvatarCount,
     int TeamCount);
-

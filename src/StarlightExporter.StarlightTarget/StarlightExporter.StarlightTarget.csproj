@@ -12,4 +12,8 @@
     <ProjectReference Include="../../vendor/Starlight/Game/Starlight.Game.Player/Starlight.Game.Player.csproj" />
     <ProjectReference Include="../../vendor/Starlight/Libraries/Starlight.Rpc/Starlight.Rpc.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="../../starlight-target.lock.json"
+                      LogicalName="StarlightExporter.StarlightTarget.starlight-target.lock.json" />
+  </ItemGroup>
 </Project>

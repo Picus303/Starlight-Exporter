@@ -14,8 +14,7 @@ public sealed record OfficialSnapshot
 public sealed record SnapshotManifest
 {
     public required int SchemaVersion { get; init; }
-    public required string StarlightCommit { get; init; }
-    public required string ProtocolVersion { get; init; }
+    public required string SourceProtocolVersion { get; init; }
     public required DateTimeOffset CapturedAtUtc { get; init; }
     public required string Region { get; init; }
     public required uint OfficialUid { get; init; }
@@ -64,4 +63,3 @@ public sealed record SnapshotTeam(
     ulong CurrentAvatarGuid);
 
 public sealed record UnsupportedRecord(string Category, string Identifier, string Reason);
-

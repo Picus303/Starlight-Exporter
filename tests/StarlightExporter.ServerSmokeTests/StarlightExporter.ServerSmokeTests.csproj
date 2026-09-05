@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../src/StarlightExporter.Persistence/StarlightExporter.Persistence.csproj" />
+    <ProjectReference Include="../../src/StarlightExporter.Snapshot/StarlightExporter.Snapshot.csproj" />
+    <ProjectReference Include="../../src/StarlightExporter.StarlightTarget/StarlightExporter.StarlightTarget.csproj" />
+    <ProjectReference Include="../../vendor/Starlight/Game/Starlight.Game.Player/Starlight.Game.Player.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../TestSupport/RealResourceTestInfrastructure.cs"
+             Link="TestSupport/RealResourceTestInfrastructure.cs" />
+    <Compile Include="../TestSupport/TestAccountDatabase.cs"
+             Link="TestSupport/TestAccountDatabase.cs" />
+  </ItemGroup>
+</Project>

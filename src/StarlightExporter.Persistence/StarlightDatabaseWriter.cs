@@ -7,7 +7,6 @@ using Starlight.Database;
 using Starlight.DbGate;
 using Starlight.DbGate.Models;
 using Starlight.Rpc.Proto;
-using StarlightExporter.Mapping;
 
 namespace StarlightExporter.Persistence;
 
@@ -91,12 +90,12 @@ public static class StarlightDatabaseWriter
                 Id = request.PlayerUid,
                 AccountId = request.PrivateAccountId,
                 Profile = new PlayerProfile {
-                    Nickname = request.Mapping.Profile.Nickname,
-                    Signature = request.Mapping.Profile.Signature,
-                    PictureId = request.Mapping.Profile.PictureId,
-                    NameCardId = request.Mapping.Profile.NameCardId
+                    Nickname = request.Profile.Nickname,
+                    Signature = request.Profile.Signature,
+                    PictureId = request.Profile.PictureId,
+                    NameCardId = request.Profile.NameCardId
                 },
-                State = request.Mapping.State.ToByteArray()
+                State = request.State.ToByteArray()
             });
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
@@ -119,25 +118,16 @@ public static class StarlightDatabaseWriter
         ArgumentException.ThrowIfNullOrWhiteSpace(request.OutputPath);
         ArgumentOutOfRangeException.ThrowIfZero(request.PlayerUid);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.PrivateAccountId);
-        ArgumentNullException.ThrowIfNull(request.Mapping);
+        ArgumentNullException.ThrowIfNull(request.Profile);
+        ArgumentNullException.ThrowIfNull(request.State);
 
         if (request.PrivateAccountId.Length > 64)
         {
             throw new ArgumentException("The private account ID cannot exceed 64 characters.", nameof(request));
         }
 
-        MappingIssue[] errors = request.Mapping.Issues
-            .Where(issue => issue.Severity == MappingIssueSeverity.Error)
-            .ToArray();
-        if (errors.Length > 0)
-        {
-            throw new ArgumentException(
-                $"The mapping contains {errors.Length} error(s) and cannot be persisted.",
-                nameof(request));
-        }
-
-        NetPlayerState reparsed = NetPlayerState.Parser.ParseFrom(request.Mapping.State.ToByteArray());
-        if (!request.Mapping.State.ToByteArray().SequenceEqual(reparsed.ToByteArray()))
+        NetPlayerState reparsed = NetPlayerState.Parser.ParseFrom(request.State.ToByteArray());
+        if (!request.State.ToByteArray().SequenceEqual(reparsed.ToByteArray()))
         {
             throw new ArgumentException("The mapped state does not survive a protobuf round-trip.", nameof(request));
         }
@@ -147,8 +137,8 @@ public static class StarlightDatabaseWriter
     {
         if (verified.Uid != request.PlayerUid
             || !string.Equals(verified.AccountId, request.PrivateAccountId, StringComparison.Ordinal)
-            || !verified.State.ToByteArray().SequenceEqual(request.Mapping.State.ToByteArray())
-            || !verified.Profile.ToByteArray().SequenceEqual(request.Mapping.Profile.ToByteArray()))
+            || !verified.State.ToByteArray().SequenceEqual(request.State.ToByteArray())
+            || !verified.Profile.ToByteArray().SequenceEqual(request.Profile.ToByteArray()))
         {
             throw new InvalidDataException("The player read from the database differs from the requested import.");
         }
