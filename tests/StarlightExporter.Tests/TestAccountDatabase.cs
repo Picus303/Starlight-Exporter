@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Starlight.Crypto;
 using Starlight.SDK.Database;
 using Starlight.SDK.Database.Models;
 
@@ -18,6 +19,27 @@ internal static class TestAccountDatabase
             Id = id,
             Username = $"test-{id}"
         }));
+        await database.SaveChangesAsync();
+    }
+
+    public static async Task CreateLoginAccountAsync(
+        string path,
+        uint accountId,
+        string username,
+        string password)
+    {
+        var options = new DbContextOptionsBuilder<SdkDbContext>()
+            .UseSqlite($"Data Source={path};Pooling=False")
+            .Options;
+
+        await using var database = new SdkDbContext(options);
+        await database.Database.EnsureCreatedAsync();
+        database.Accounts.Add(new Account {
+            Id = accountId,
+            Username = username,
+            PasswordHash = Argon2Crypto.Hash(password),
+            PasswordTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+        });
         await database.SaveChangesAsync();
     }
 }

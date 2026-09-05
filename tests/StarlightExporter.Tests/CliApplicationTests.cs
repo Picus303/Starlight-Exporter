@@ -7,6 +7,7 @@ using Xunit;
 
 namespace StarlightExporter.Tests;
 
+[Collection("Real resources")]
 public sealed class CliApplicationTests
 {
     [Fact]
@@ -286,7 +287,7 @@ internal static class RealResourceArchive
         return File.Exists(archivePath) ? archivePath : null;
     }
 
-    private static string? FindRepositoryRoot()
+    internal static string? FindRepositoryRoot()
     {
         DirectoryInfo? directory = new(AppContext.BaseDirectory);
         while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "StarlightExporter.slnx")))
@@ -297,3 +298,6 @@ internal static class RealResourceArchive
         return directory?.FullName;
     }
 }
+
+[CollectionDefinition("Real resources", DisableParallelization = true)]
+public sealed class RealResourceSerialGroup;

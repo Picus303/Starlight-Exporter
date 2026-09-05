@@ -1,0 +1,113 @@
+{
+  "manifest": {
+    "schemaVersion": 1,
+    "starlightCommit": "c1cd286c4909d31d355006899c5905ef6adf9741",
+    "protocolVersion": "V70",
+    "capturedAtUtc": "2026-09-05T12:00:00Z",
+    "region": "synthetic-smoke",
+    "officialUid": 765432100
+  },
+  "player": {
+    "nickname": "SmokeTest",
+    "signature": "Synthetic offline fixture",
+    "pictureId": 10000005,
+    "nameCardId": 210001,
+    "bornState": "complete",
+    "bornAvatarId": 10000005,
+    "currentAvatarTeamId": 1
+  },
+  "materials": [
+    {
+      "itemId": 104003,
+      "guid": 10001,
+      "count": 25
+    },
+    {
+      "itemId": 104013,
+      "guid": 10002,
+      "count": 75
+    }
+  ],
+  "weapons": [
+    {
+      "itemId": 11101,
+      "guid": 20001,
+      "level": 20,
+      "refinement": 1,
+      "promoteLevel": 1,
+      "affixId": 0,
+      "gadgetId": 50011101
+    },
+    {
+      "itemId": 11101,
+      "guid": 20002,
+      "level": 40,
+      "refinement": 2,
+      "promoteLevel": 2,
+      "affixId": 0,
+      "gadgetId": 50011101
+    },
+    {
+      "itemId": 15101,
+      "guid": 20003,
+      "level": 50,
+      "refinement": 3,
+      "promoteLevel": 3,
+      "affixId": 0,
+      "gadgetId": 50015101
+    }
+  ],
+  "avatars": [
+    {
+      "avatarId": 10000005,
+      "guid": 30001,
+      "level": 20,
+      "constellation": 0,
+      "bornTime": 1788516000,
+      "weaponGuid": 20001
+    },
+    {
+      "avatarId": 10000015,
+      "guid": 30002,
+      "level": 40,
+      "constellation": 1,
+      "bornTime": 1788516001,
+      "weaponGuid": 20002
+    },
+    {
+      "avatarId": 10000021,
+      "guid": 30003,
+      "level": 50,
+      "constellation": 2,
+      "bornTime": 1788516002,
+      "weaponGuid": 20003
+    }
+  ],
+  "teams": [
+    {
+      "teamId": 1,
+      "name": "Full team",
+      "avatarGuids": [30001, 30002, 30003],
+      "currentAvatarGuid": 30001
+    },
+    {
+      "teamId": 2,
+      "name": "Pair",
+      "avatarGuids": [30001, 30003],
+      "currentAvatarGuid": 30003
+    },
+    {
+      "teamId": 3,
+      "name": "Solo sword",
+      "avatarGuids": [30002],
+      "currentAvatarGuid": 30002
+    },
+    {
+      "teamId": 4,
+      "name": "Solo bow",
+      "avatarGuids": [30003],
+      "currentAvatarGuid": 30003
+    }
+  ],
+  "unsupported": []
+}

@@ -7,6 +7,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$env:MSBUILDDISABLENODEREUSE = "1"
 
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $expectedStarlightCommit = "c1cd286c4909d31d355006899c5905ef6adf9741"
@@ -51,13 +52,13 @@ try {
     Invoke-Checked "Exporter Release build" {
         dotnet build StarlightExporter.slnx --configuration Release --no-restore
     }
-    Invoke-Checked "Exporter Release tests" {
-        dotnet test StarlightExporter.slnx --configuration Release --no-build --no-restore
-    }
     Invoke-Checked "Pinned Starlight server Release build" {
         dotnet build vendor/Starlight/Source/Starlight/Starlight.csproj `
             --configuration Release `
             --no-restore
+    }
+    Invoke-Checked "Exporter Release tests" {
+        dotnet test StarlightExporter.slnx --configuration Release --no-build --no-restore
     }
 
     if (-not $SkipRealResources) {
