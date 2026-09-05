@@ -135,6 +135,34 @@ public sealed class StarlightSnapshotMapperEdgeTests
         AssertIssue(result, "WEAPON_LIMIT_REACHED", MappingIssueSeverity.Warning);
     }
 
+    [Theory]
+    [InlineData(1u, 1u, 0u, true)]
+    [InlineData(20u, 1u, 1u, false)]
+    [InlineData(20u, 2u, 1u, true)]
+    [InlineData(21u, 0u, 1u, true)]
+    [InlineData(40u, 2u, 2u, false)]
+    [InlineData(90u, 0u, 6u, true)]
+    [InlineData(90u, 9u, 6u, true)]
+    public async Task WeaponPromotionUsesOfficialStageWhenCompatible(
+        uint level,
+        uint sourcePromotion,
+        uint expectedPromotion,
+        bool expectsRepair)
+    {
+        OfficialSnapshot source = await ReadMinimalAsync();
+        OfficialSnapshot snapshot = source with {
+            Weapons = [source.Weapons[0] with { Level = level, PromoteLevel = sourcePromotion }]
+        };
+
+        StarlightMappingResult result = new StarlightSnapshotMapper(TestGameData.Create()).Map(snapshot);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expectedPromotion, Assert.Single(result.State.Weapons).PromoteLevel);
+        Assert.Equal(
+            expectsRepair,
+            result.Issues.Any(issue => issue.Code == "WEAPON_PROMOTE_LEVEL_REPAIRED"));
+    }
+
     private static void AssertIssue(
         StarlightMappingResult result,
         string code,

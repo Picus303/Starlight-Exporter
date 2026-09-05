@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="../StarlightExporter.Snapshot/StarlightExporter.Snapshot.csproj" />
     <ProjectReference Include="../../vendor/Starlight/Game/Starlight.Game.Resources/Starlight.Game.Resources.csproj" />
+    <ProjectReference Include="../../vendor/Starlight/Game/Starlight.Game.Player/Starlight.Game.Player.csproj" />
     <ProjectReference Include="../../vendor/Starlight/Libraries/Starlight.Rpc/Starlight.Rpc.csproj" />
   </ItemGroup>
 </Project>

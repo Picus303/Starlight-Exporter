@@ -134,12 +134,13 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
                 continue;
             }
 
-            uint promoteLevel = Math.Min(source.PromoteLevel, 6u);
+            (uint minimumPromotion, uint maximumPromotion) = PromotionRangeFor(source.Level);
+            uint promoteLevel = Math.Clamp(source.PromoteLevel, minimumPromotion, maximumPromotion);
             if (promoteLevel != source.PromoteLevel)
             {
                 issues.Add(Warning(
-                    "WEAPON_PROMOTE_LEVEL_CLAMPED",
-                    $"Weapon {source.Guid} promote level was clamped from {source.PromoteLevel} to {promoteLevel}."));
+                    "WEAPON_PROMOTE_LEVEL_REPAIRED",
+                    $"Weapon {source.Guid} promote level was adjusted from {source.PromoteLevel} to {promoteLevel} for level {source.Level}."));
             }
 
             uint affixId = resource.SkillAffix.FirstOrDefault();
@@ -314,6 +315,22 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
         && gameData.AvatarSkillDepotData.ContainsKey(avatar.SkillDepotId)
         && gameData.WeaponData.ContainsKey(avatar.InitialWeapon)
         && gameData.Avatars.ContainsKey(avatarId);
+
+    private static (uint Minimum, uint Maximum) PromotionRangeFor(uint level) => level switch {
+        < 20 => (0, 0),
+        20 => (0, 1),
+        < 40 => (1, 1),
+        40 => (1, 2),
+        < 50 => (2, 2),
+        50 => (2, 3),
+        < 60 => (3, 3),
+        60 => (3, 4),
+        < 70 => (4, 4),
+        70 => (4, 5),
+        < 80 => (5, 5),
+        80 => (5, 6),
+        _ => (6, 6)
+    };
 
     private static void ValidateMappedState(NetPlayerState state, List<MappingIssue> issues)
     {

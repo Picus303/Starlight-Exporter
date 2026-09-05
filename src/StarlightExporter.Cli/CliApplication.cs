@@ -124,6 +124,21 @@ public static class CliApplication
             return InvalidMapping;
         }
 
+        StarlightModuleValidationResult moduleValidation =
+            await StarlightModuleCompatibilityValidator.ValidateAsync(
+                snapshot.Manifest.OfficialUid,
+                gameData,
+                mapping.Profile,
+                mapping.State,
+                cancellationToken);
+        await WriteModuleDiagnosticsAsync(moduleValidation.Diagnostics, error);
+        if (!moduleValidation.IsCompatible)
+        {
+            await error.WriteLineAsync("Mapped state was rejected by the pinned Starlight modules.");
+            return InvalidMapping;
+        }
+
+        await output.WriteLineAsync("Module compatibility: accepted.");
         await output.WriteLineAsync("Target compatibility: accepted.");
         return Success;
     }
@@ -198,12 +213,27 @@ public static class CliApplication
             return InvalidMapping;
         }
 
+        StarlightModuleValidationResult moduleValidation =
+            await StarlightModuleCompatibilityValidator.ValidateAsync(
+                snapshot.Manifest.OfficialUid,
+                gameData,
+                mapping.Profile,
+                mapping.State,
+                cancellationToken);
+        await WriteModuleDiagnosticsAsync(moduleValidation.Diagnostics, error);
+        if (!moduleValidation.IsCompatible)
+        {
+            await error.WriteLineAsync("Mapped state was rejected by the pinned Starlight modules.");
+            return InvalidMapping;
+        }
+
         try
         {
             StarlightDatabaseWriteResult result = await BuildOutputDirectoryAsync(
                 options,
                 snapshot,
                 mapping,
+                moduleValidation,
                 cancellationToken);
             await output.WriteLineAsync($"Database written: {Path.Combine(options.OutputDirectory, "starlight.db")}");
             await output.WriteLineAsync($"Import report written: {Path.Combine(options.OutputDirectory, "import-report.json")}");
@@ -223,6 +253,7 @@ public static class CliApplication
         BuildDatabaseOptions options,
         OfficialSnapshot snapshot,
         StarlightMappingResult mapping,
+        StarlightModuleValidationResult moduleValidation,
         CancellationToken cancellationToken)
     {
         string outputParent = Path.GetDirectoryName(options.OutputDirectory)
@@ -243,7 +274,7 @@ public static class CliApplication
                     mapping),
                 cancellationToken);
 
-            ImportReport report = ImportReport.Create(snapshot, mapping, result);
+            ImportReport report = ImportReport.Create(snapshot, mapping, result, moduleValidation);
             await ImportReportWriter.WriteAsync(
                 Path.Combine(temporaryDirectory, "import-report.json"),
                 report,
@@ -416,6 +447,16 @@ public static class CliApplication
         {
             await output.WriteLineAsync(
                 $"{issue.Severity.ToString().ToUpperInvariant()} {issue.Code}: {issue.Message}");
+        }
+    }
+
+    private static async Task WriteModuleDiagnosticsAsync(
+        IReadOnlyCollection<ModuleValidationDiagnostic> diagnostics,
+        TextWriter output)
+    {
+        foreach (ModuleValidationDiagnostic diagnostic in diagnostics)
+        {
+            await output.WriteLineAsync($"ERROR {diagnostic.Code}: {diagnostic.Message}");
         }
     }
 

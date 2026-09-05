@@ -18,16 +18,19 @@ public sealed record ImportReport(
     ImportCounts Source,
     ImportCounts Imported,
     IReadOnlyDictionary<string, int> Unsupported,
+    StarlightModuleValidationResult ModuleValidation,
     IReadOnlyList<MappingIssue> Issues)
 {
     public static ImportReport Create(
         OfficialSnapshot snapshot,
         StarlightMappingResult mapping,
-        StarlightDatabaseWriteResult persisted)
+        StarlightDatabaseWriteResult persisted,
+        StarlightModuleValidationResult moduleValidation)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(mapping);
         ArgumentNullException.ThrowIfNull(persisted);
+        ArgumentNullException.ThrowIfNull(moduleValidation);
 
         return new ImportReport(
             SchemaVersion: 1,
@@ -51,6 +54,7 @@ public sealed record ImportReport(
             snapshot.Unsupported
                 .GroupBy(item => item.Category, StringComparer.Ordinal)
                 .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal),
+            moduleValidation,
             mapping.Issues);
     }
 }

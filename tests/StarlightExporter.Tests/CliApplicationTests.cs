@@ -52,6 +52,12 @@ public sealed class CliApplicationTests
             Assert.Equal(expected: 765432100u, report.RootElement.GetProperty("privateUid").GetUInt32());
             Assert.Equal("1", report.RootElement.GetProperty("privateAccountId").GetString());
             Assert.Equal(expected: 4, report.RootElement.GetProperty("imported").GetProperty("teams").GetInt32());
+            JsonElement moduleValidation = report.RootElement.GetProperty("moduleValidation");
+            Assert.True(moduleValidation.GetProperty("isCompatible").GetBoolean());
+            Assert.True(moduleValidation.GetProperty("statePreserved").GetBoolean());
+            Assert.True(moduleValidation.GetProperty("storeNotificationMatches").GetBoolean());
+            Assert.True(moduleValidation.GetProperty("avatarNotificationMatches").GetBoolean());
+            Assert.Empty(moduleValidation.GetProperty("repairNotifications").EnumerateArray());
             Assert.DoesNotContain("password", reportJson, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("token", reportJson, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("cookie", reportJson, StringComparison.OrdinalIgnoreCase);
@@ -108,6 +114,7 @@ public sealed class CliApplicationTests
             Assert.Equal(CliApplication.Success, exitCode);
             Assert.Contains("Mapped: 1 materials, 1 weapons, 1 avatars, 4 teams", output.ToString(), StringComparison.Ordinal);
             Assert.Contains("Target compatibility: accepted", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains("Module compatibility: accepted", output.ToString(), StringComparison.Ordinal);
             Assert.Contains("WARNING TEAM_SLOTS_COMPLETED", error.ToString(), StringComparison.Ordinal);
             Assert.Equal(
                 ["resources"],

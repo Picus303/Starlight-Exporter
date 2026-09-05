@@ -12,6 +12,64 @@ namespace StarlightExporter.Tests;
 public sealed class StarlightModuleCompatibilityTests
 {
     [Fact]
+    public async Task ApplicationValidatorAcceptsMappedStateWithoutRepair()
+    {
+        GameData data = TestGameData.Create();
+        OfficialSnapshot snapshot = await OfficialSnapshotSerializer.ReadAsync(
+            Path.Combine(AppContext.BaseDirectory, "Fixtures", "minimal-valid.json"));
+        StarlightMappingResult mapping = new StarlightSnapshotMapper(data).Map(snapshot);
+
+        StarlightModuleValidationResult result = await StarlightModuleCompatibilityValidator.ValidateAsync(
+            snapshot.Manifest.OfficialUid,
+            data,
+            mapping.Profile,
+            mapping.State);
+
+        Assert.True(result.IsCompatible, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.True(result.StatePreserved);
+        Assert.True(result.StoreNotificationMatches);
+        Assert.True(result.AvatarNotificationMatches);
+        Assert.Empty(result.RepairNotifications);
+        Assert.Equal(new ModuleValidationCounts(1, 1, 1, 4), result.Loaded);
+    }
+
+    [Fact]
+    public async Task ApplicationValidatorDetectsStarlightWeaponRepair()
+    {
+        NetPlayerState incomplete = CreateKnownGoodState();
+        incomplete.Weapons.Clear();
+
+        StarlightModuleValidationResult result = await StarlightModuleCompatibilityValidator.ValidateAsync(
+            playerUid: 765432100,
+            TestGameData.Create(),
+            new NetPlayerProfile { Nickname = "Traveler" },
+            incomplete);
+
+        Assert.False(result.IsCompatible);
+        Assert.False(result.StatePreserved);
+        Assert.Contains("StoreItemChangeNotify", result.RepairNotifications);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "MODULE_STATE_MUTATED");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "MODULE_REPAIR_NOTIFICATION");
+    }
+
+    [Fact]
+    public async Task ApplicationValidatorDetectsSilentlyDroppedInventoryItem()
+    {
+        NetPlayerState incomplete = CreateKnownGoodState();
+        incomplete.Materials.Add(new NetMaterial { ItemId = 99999, Guid = 99999, Count = 1 });
+
+        StarlightModuleValidationResult result = await StarlightModuleCompatibilityValidator.ValidateAsync(
+            playerUid: 765432100,
+            TestGameData.Create(),
+            new NetPlayerProfile { Nickname = "Traveler" },
+            incomplete);
+
+        Assert.False(result.IsCompatible);
+        Assert.True(result.StatePreserved);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "MODULE_ENTITY_COUNT_MISMATCH");
+    }
+
+    [Fact]
     public async Task MinimalSnapshotMapsAndLoadsWithoutStarlightRepair()
     {
         GameData data = TestGameData.Create();
