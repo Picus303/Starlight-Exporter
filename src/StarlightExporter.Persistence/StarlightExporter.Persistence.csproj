@@ -10,5 +10,6 @@
     <ProjectReference Include="../StarlightExporter.Mapping/StarlightExporter.Mapping.csproj" />
     <ProjectReference Include="../../vendor/Starlight/Libraries/Starlight.Database/Starlight.Database.csproj" />
     <ProjectReference Include="../../vendor/Starlight/Source/Starlight.DbGate/Starlight.DbGate.csproj" />
+    <ProjectReference Include="../../vendor/Starlight/Source/Starlight.SDK/Starlight.SDK.csproj" />
   </ItemGroup>
 </Project>

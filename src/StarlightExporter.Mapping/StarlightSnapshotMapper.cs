@@ -6,7 +6,9 @@ namespace StarlightExporter.Mapping;
 
 public sealed class StarlightSnapshotMapper(GameData gameData)
 {
+    private const int MaterialCountLimit = 2000;
     private const uint MaxTeamCount = 4;
+    private const int WeaponCountLimit = 2000;
 
     public StarlightMappingResult Map(OfficialSnapshot snapshot)
     {
@@ -56,6 +58,8 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
                 $"Born avatar {state.BornAvatarId} could not be mapped with the target resources."));
         }
 
+        ValidateMappedState(state, issues);
+
         return new StarlightMappingResult(profile, state, issues);
     }
 
@@ -64,6 +68,7 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
         NetPlayerState state,
         List<MappingIssue> issues)
     {
+        int excludedByLimit = 0;
         foreach (SnapshotMaterial source in materials.OrderBy(material => material.ItemId))
         {
             if (!gameData.MaterialData.TryGetValue(source.ItemId, out var resource)
@@ -72,6 +77,12 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
                 issues.Add(Warning(
                     "UNSUPPORTED_ITEM",
                     $"Material {source.ItemId} is absent from or unsupported by the target resources."));
+                continue;
+            }
+
+            if (state.Materials.Count >= MaterialCountLimit)
+            {
+                excludedByLimit++;
                 continue;
             }
 
@@ -90,6 +101,13 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
                 Count = count
             });
         }
+
+        if (excludedByLimit > 0)
+        {
+            issues.Add(Warning(
+                "MATERIAL_LIMIT_REACHED",
+                $"{excludedByLimit} material stack(s) were excluded because Starlight accepts at most {MaterialCountLimit}."));
+        }
     }
 
     private HashSet<ulong> MapWeapons(
@@ -98,6 +116,7 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
         List<MappingIssue> issues)
     {
         var mappedGuids = new HashSet<ulong>();
+        int excludedByLimit = 0;
 
         foreach (SnapshotWeapon source in weapons.OrderBy(weapon => weapon.Guid))
         {
@@ -109,6 +128,12 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
                 continue;
             }
 
+            if (state.Weapons.Count >= WeaponCountLimit)
+            {
+                excludedByLimit++;
+                continue;
+            }
+
             uint promoteLevel = Math.Min(source.PromoteLevel, 6u);
             if (promoteLevel != source.PromoteLevel)
             {
@@ -117,16 +142,44 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
                     $"Weapon {source.Guid} promote level was clamped from {source.PromoteLevel} to {promoteLevel}."));
             }
 
+            uint affixId = resource.SkillAffix.FirstOrDefault();
+            if (resource.SkillAffix.Count == 0)
+            {
+                issues.Add(Warning(
+                    "WEAPON_AFFIX_MISSING",
+                    $"Weapon resource {source.ItemId} has no skill affix; affix ID zero will be used."));
+            }
+            else if (resource.SkillAffix.Count > 1)
+            {
+                issues.Add(Warning(
+                    "WEAPON_AFFIX_AMBIGUOUS",
+                    $"Weapon resource {source.ItemId} has multiple skill affixes; {affixId} was selected to match Starlight."));
+            }
+
+            if (source.AffixId != affixId || source.GadgetId != resource.GadgetId)
+            {
+                issues.Add(Warning(
+                    "WEAPON_METADATA_REPLACED",
+                    $"Weapon {source.Guid} metadata was replaced with values from the target resources."));
+            }
+
             state.Weapons.Add(new NetWeapon {
                 ItemId = source.ItemId,
                 Guid = source.Guid,
                 Level = source.Level,
                 Refinement = source.Refinement,
                 PromoteLevel = promoteLevel,
-                AffixId = resource.SkillAffix.FirstOrDefault(),
+                AffixId = affixId,
                 GadgetId = resource.GadgetId
             });
             mappedGuids.Add(source.Guid);
+        }
+
+        if (excludedByLimit > 0)
+        {
+            issues.Add(Warning(
+                "WEAPON_LIMIT_REACHED",
+                $"{excludedByLimit} weapon(s) were excluded because Starlight accepts at most {WeaponCountLimit}."));
         }
 
         return mappedGuids;
@@ -261,6 +314,31 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
         && gameData.AvatarSkillDepotData.ContainsKey(avatar.SkillDepotId)
         && gameData.WeaponData.ContainsKey(avatar.InitialWeapon)
         && gameData.Avatars.ContainsKey(avatarId);
+
+    private static void ValidateMappedState(NetPlayerState state, List<MappingIssue> issues)
+    {
+        bool invalid = state.Materials.Count > MaterialCountLimit
+            || state.Materials.Any(item => item.ItemId == 0 || item.Guid == 0 || item.Count == 0)
+            || state.Weapons.Count > WeaponCountLimit
+            || state.Weapons.Any(item => item.ItemId == 0 || item.Guid == 0)
+            || state.Avatars.Any(avatar => avatar.AvatarId == 0
+                || avatar.Guid == 0
+                || state.Weapons.All(weapon => weapon.Guid != avatar.WeaponGuid))
+            || state.AvatarTeams.Count != MaxTeamCount
+            || state.AvatarTeams.Select(team => team.TeamId).Distinct().Count() != MaxTeamCount
+            || state.AvatarTeams.Any(team => team.TeamId is < 1 or > MaxTeamCount
+                || team.AvatarGuids.Any(guid => state.Avatars.All(avatar => avatar.Guid != guid))
+                || team.AvatarGuids.Count > 0 && !team.AvatarGuids.Contains(team.CurrentAvatarGuid))
+            || state.AvatarTeams.All(team => team.TeamId != state.CurrentAvatarTeamId
+                || team.AvatarGuids.Count == 0);
+
+        if (invalid)
+        {
+            issues.Add(Error(
+                "STATE_INVARIANT_FAILED",
+                "The mapped player state does not satisfy the invariants required by the pinned Starlight modules."));
+        }
+    }
 
     private static NetAvatarTeam CreateEmptyTeam(uint teamId) => new() {
         TeamId = teamId,

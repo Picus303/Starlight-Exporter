@@ -1,0 +1,13 @@
+{
+  "repository": "capyb2222/LunaGC-Resources",
+  "revision": "8d7ee68210c5b9a8375db80b858b186a6f6d3731",
+  "upstreamVersion": "7.0",
+  "requiredEntries": [
+    "ExcelBinOutput/AvatarExcelConfigData.json",
+    "ExcelBinOutput/AvatarSkillDepotExcelConfigData.json",
+    "ExcelBinOutput/MaterialExcelConfigData.json",
+    "ExcelBinOutput/WeaponExcelConfigData.json",
+    "BinOutput/Common/ConfigGlobalCombat.json",
+    "BinOutput/Avatar/ConfigAvatar_PlayerBoy.json"
+  ]
+}

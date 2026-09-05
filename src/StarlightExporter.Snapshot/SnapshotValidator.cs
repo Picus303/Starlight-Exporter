@@ -106,6 +106,10 @@ public static class SnapshotValidator
             AddIf(avatar.Guid == 0, "AVATAR_GUID_MISSING", "Avatar GUID must be non-zero.", errors);
             AddIf(avatar.Level is < 1 or > 90, "AVATAR_LEVEL_INVALID", "Avatar level must be between 1 and 90.", errors);
             AddIf(avatar.Constellation > 6, "AVATAR_CONSTELLATION_INVALID", "Avatar constellation cannot exceed 6.", errors);
+            AddIf(avatar.BornTime is < 0 or > uint.MaxValue,
+                "AVATAR_BORN_TIME_INVALID",
+                $"Avatar {avatar.AvatarId} born time must fit in an unsigned 32-bit value.",
+                errors);
             AddIf(!weaponGuids.Contains(avatar.WeaponGuid),
                 "AVATAR_WEAPON_MISSING",
                 $"Avatar {avatar.AvatarId} references missing weapon GUID {avatar.WeaponGuid}.",

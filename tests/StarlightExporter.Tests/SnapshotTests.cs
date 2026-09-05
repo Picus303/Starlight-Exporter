@@ -33,6 +33,21 @@ public sealed class SnapshotTests
         Assert.Contains(result.Errors, error => error.Code == "CURRENT_TEAM_MISSING");
     }
 
+    [Theory]
+    [InlineData(-1)]
+    [InlineData((long)uint.MaxValue + 1)]
+    public async Task AvatarBornTimeMustFitInUInt32(long bornTime)
+    {
+        OfficialSnapshot source = await OfficialSnapshotSerializer.ReadAsync(FixturePath("minimal-valid.json"));
+        OfficialSnapshot snapshot = source with {
+            Avatars = [source.Avatars[0] with { BornTime = bornTime }]
+        };
+
+        SnapshotValidationResult result = SnapshotValidator.Validate(snapshot);
+
+        Assert.Contains(result.Errors, error => error.Code == "AVATAR_BORN_TIME_INVALID");
+    }
+
     private static string FixturePath(string fileName) =>
         Path.Combine(AppContext.BaseDirectory, "Fixtures", fileName);
 }

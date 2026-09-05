@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Configuration;
+using Starlight.Game.Resources;
 using StarlightExporter.Cli;
 using Xunit;
 
@@ -15,9 +17,11 @@ public sealed class CliApplicationTests
             "StarlightExporter.Tests",
             Guid.NewGuid().ToString("N"));
         string resourcesDirectory = Path.Combine(testDirectory, "resources");
+        string accountDatabasePath = Path.Combine(testDirectory, "accounts.db");
         string outputDirectory = Path.Combine(testDirectory, "output");
         Directory.CreateDirectory(testDirectory);
         TestResourceDirectory.Create(resourcesDirectory);
+        await TestAccountDatabase.CreateAsync(accountDatabasePath, 1);
         using var output = new StringWriter();
         using var error = new StringWriter();
 
@@ -29,12 +33,14 @@ public sealed class CliApplicationTests
                     FixturePath("minimal-valid.json"),
                     "--resources", resourcesDirectory,
                     "--output", outputDirectory,
-                    "--private-account-id", "1"
+                    "--private-account-id", "1",
+                    "--accounts-db", accountDatabasePath
                 ],
                 output,
                 error);
 
             Assert.Equal(CliApplication.Success, exitCode);
+            Assert.Contains("Private account 1 exists", output.ToString(), StringComparison.Ordinal);
             Assert.Contains("WARNING TEAM_SLOTS_COMPLETED", error.ToString(), StringComparison.Ordinal);
             Assert.True(File.Exists(Path.Combine(outputDirectory, "starlight.db")));
             string reportPath = Path.Combine(outputDirectory, "import-report.json");
@@ -80,6 +86,61 @@ public sealed class CliApplicationTests
     }
 
     [Fact]
+    public async Task InspectWithResourcesPerformsMappingPreflightWithoutWritingFiles()
+    {
+        string testDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "StarlightExporter.Tests",
+            Guid.NewGuid().ToString("N"));
+        string resourcesDirectory = Path.Combine(testDirectory, "resources");
+        Directory.CreateDirectory(testDirectory);
+        TestResourceDirectory.Create(resourcesDirectory);
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        try
+        {
+            int exitCode = await CliApplication.RunAsync(
+                ["inspect", FixturePath("minimal-valid.json"), "--resources", resourcesDirectory],
+                output,
+                error);
+
+            Assert.Equal(CliApplication.Success, exitCode);
+            Assert.Contains("Mapped: 1 materials, 1 weapons, 1 avatars, 4 teams", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains("Target compatibility: accepted", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains("WARNING TEAM_SLOTS_COMPLETED", error.ToString(), StringComparison.Ordinal);
+            Assert.Equal(
+                ["resources"],
+                Directory.EnumerateFileSystemEntries(testDirectory).Select(path => Path.GetFileName(path)!).ToArray());
+        }
+        finally
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [RealResourcesFact]
+    public async Task PinnedRealResourceArchiveLoadsWhenAvailable()
+    {
+        string archivePath = RealResourceArchive.Find()!;
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> {
+                ["Game:ResourcesPath"] = archivePath
+            })
+            .Build();
+        var gameData = new GameData(configuration);
+
+        await gameData.StartAsync(CancellationToken.None);
+
+        Assert.True(gameData.MaterialData.Count > 100);
+        Assert.True(gameData.WeaponData.Count > 100);
+        Assert.True(gameData.AvatarData.Count > 50);
+        Assert.Contains(expected: 11101u, gameData.WeaponData.Keys);
+        Assert.Contains(expected: 10000005u, gameData.AvatarData.Keys);
+    }
+
+    [Fact]
     public async Task BuildDatabaseWithMissingResourcesReturnsResourceError()
     {
         string outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -100,6 +161,47 @@ public sealed class CliApplicationTests
         Assert.Equal(CliApplication.InvalidResources, exitCode);
         Assert.Contains("Target resources not found", error.ToString(), StringComparison.Ordinal);
         Assert.False(Directory.Exists(outputDirectory));
+    }
+
+    [Fact]
+    public async Task BuildDatabaseRefusesMissingPrivateAccountBeforeCreatingOutput()
+    {
+        string testDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "StarlightExporter.Tests",
+            Guid.NewGuid().ToString("N"));
+        string resourcesDirectory = Path.Combine(testDirectory, "resources");
+        string accountDatabasePath = Path.Combine(testDirectory, "accounts.db");
+        string outputDirectory = Path.Combine(testDirectory, "output");
+        Directory.CreateDirectory(testDirectory);
+        TestResourceDirectory.Create(resourcesDirectory);
+        await TestAccountDatabase.CreateAsync(accountDatabasePath, 7);
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        try
+        {
+            int exitCode = await CliApplication.RunAsync(
+                [
+                    "build-db",
+                    FixturePath("minimal-valid.json"),
+                    "--resources", resourcesDirectory,
+                    "--output", outputDirectory,
+                    "--private-account-id", "8",
+                    "--accounts-db", accountDatabasePath
+                ],
+                output,
+                error);
+
+            Assert.Equal(CliApplication.DatabaseError, exitCode);
+            Assert.Contains("ERROR ACCOUNT_NOT_FOUND", error.ToString(), StringComparison.Ordinal);
+            Assert.False(Directory.Exists(outputDirectory));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(testDirectory, recursive: true);
+        }
     }
 
     [Fact]
@@ -126,4 +228,46 @@ public sealed class CliApplicationTests
 
     private static string FixturePath(string fileName) =>
         Path.Combine(AppContext.BaseDirectory, "Fixtures", fileName);
+
+}
+
+internal sealed class RealResourcesFactAttribute : FactAttribute
+{
+    public RealResourcesFactAttribute()
+    {
+        if (RealResourceArchive.Find() is null)
+        {
+            Skip = "Set STARLIGHT_EXPORTER_TEST_RESOURCES or run scripts/prepare-resources.ps1 to enable this integration test.";
+        }
+    }
+}
+
+internal static class RealResourceArchive
+{
+    public static string? Find()
+    {
+        string? configuredPath = Environment.GetEnvironmentVariable("STARLIGHT_EXPORTER_TEST_RESOURCES");
+        if (!string.IsNullOrWhiteSpace(configuredPath))
+        {
+            string fullPath = Path.GetFullPath(configuredPath);
+            return File.Exists(fullPath) ? fullPath : null;
+        }
+
+        string? repositoryRoot = FindRepositoryRoot();
+        string archivePath = repositoryRoot is null
+            ? string.Empty
+            : Path.Combine(repositoryRoot, ".local", "resources", "resources.zip");
+        return File.Exists(archivePath) ? archivePath : null;
+    }
+
+    private static string? FindRepositoryRoot()
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "StarlightExporter.slnx")))
+        {
+            directory = directory.Parent;
+        }
+
+        return directory?.FullName;
+    }
 }

@@ -6,6 +6,7 @@
 [Tt]est[Rr]esults/
 artifacts/
 output/
+.local/
 
 *.db
 *.db-shm
@@ -17,4 +18,3 @@ resources.zip
 .env
 .env.*
 !.env.example
-
