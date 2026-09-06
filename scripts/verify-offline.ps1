@@ -35,10 +35,23 @@ function Assert-GitCommit([string] $Path, [string] $Expected, [string] $Label) {
     Write-Host "$Label revision: $actual"
 }
 
+function Assert-GitClean([string] $Path, [string] $Label) {
+    $changes = @(& git -C $Path status --porcelain --untracked-files=normal)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to inspect the $Label worktree at '$Path'."
+    }
+    if ($changes.Count -ne 0) {
+        throw "$Label worktree must remain unmodified."
+    }
+    Write-Host "$Label worktree: clean"
+}
+
 Push-Location $repositoryRoot
 try {
     Assert-GitCommit "vendor/Starlight" $expectedStarlightCommit "Starlight"
     Assert-GitCommit "vendor/Starlight/Protocol" $expectedProtocolCommit "Starlight Protocol"
+    Assert-GitClean "vendor/Starlight/Protocol" "Starlight Protocol"
+    Assert-GitClean "vendor/Starlight" "Starlight"
 
     if (-not $SkipRestore) {
         Invoke-Checked "Exporter dependency restore" {
@@ -63,6 +76,10 @@ try {
     }
     Invoke-Checked "Exporter unit tests" {
         dotnet test tests/StarlightExporter.UnitTests/StarlightExporter.UnitTests.csproj `
+            --configuration Release --no-restore
+    }
+    Invoke-Checked "Official client offline tests" {
+        dotnet test tests/StarlightExporter.OfficialTests/StarlightExporter.OfficialTests.csproj `
             --configuration Release --no-restore
     }
 

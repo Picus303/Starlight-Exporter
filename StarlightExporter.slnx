@@ -1,11 +1,13 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/StarlightExporter.Cli/StarlightExporter.Cli.csproj" />
+    <Project Path="src/StarlightExporter.Official/StarlightExporter.Official.csproj" />
     <Project Path="src/StarlightExporter.StarlightTarget/StarlightExporter.StarlightTarget.csproj" />
     <Project Path="src/StarlightExporter.Persistence/StarlightExporter.Persistence.csproj" />
     <Project Path="src/StarlightExporter.Snapshot/StarlightExporter.Snapshot.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/StarlightExporter.OfficialTests/StarlightExporter.OfficialTests.csproj" />
     <Project Path="tests/StarlightExporter.ServerSmokeTests/StarlightExporter.ServerSmokeTests.csproj" />
     <Project Path="tests/StarlightExporter.StarlightCompatibilityTests/StarlightExporter.StarlightCompatibilityTests.csproj" />
     <Project Path="tests/StarlightExporter.UnitTests/StarlightExporter.UnitTests.csproj" />

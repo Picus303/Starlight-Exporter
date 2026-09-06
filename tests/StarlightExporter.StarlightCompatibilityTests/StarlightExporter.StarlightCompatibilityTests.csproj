@@ -1,10 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="../../src/StarlightExporter.Cli/StarlightExporter.Cli.csproj" />
+    <ProjectReference Include="../../src/StarlightExporter.Official/StarlightExporter.Official.csproj" />
     <ProjectReference Include="../../src/StarlightExporter.Persistence/StarlightExporter.Persistence.csproj" />
     <ProjectReference Include="../../src/StarlightExporter.Snapshot/StarlightExporter.Snapshot.csproj" />
     <ProjectReference Include="../../src/StarlightExporter.StarlightTarget/StarlightExporter.StarlightTarget.csproj" />
     <ProjectReference Include="../../vendor/Starlight/Game/Starlight.Game.Player/Starlight.Game.Player.csproj" />
+    <ProjectReference Include="../../vendor/Starlight/Source/Starlight.Gate/Starlight.Gate.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../TestSupport/*.cs" Link="TestSupport/%(Filename)%(Extension)" />

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../StarlightExporter.Snapshot/StarlightExporter.Snapshot.csproj" />
+    <ProjectReference Include="../../vendor/Starlight/Protocol/Starlight.Protocol.V70/Starlight.Protocol.V70.csproj" />
+    <ProjectReference Include="../../vendor/Starlight/Libraries/Starlight.Protocol/Starlight.Protocol.csproj" />
+    <ProjectReference Include="../../vendor/Starlight/Libraries/Starlight.Crypto.Client/Starlight.Crypto.Client.csproj" />
+    <ProjectReference Include="../../vendor/Starlight/Libraries/Starlight.Ec2b/Starlight.Ec2b.csproj" />
+    <ProjectReference Include="../../vendor/Starlight/Libraries/Starlight.Kcp/Starlight.Kcp.csproj" />
+  </ItemGroup>
+</Project>
