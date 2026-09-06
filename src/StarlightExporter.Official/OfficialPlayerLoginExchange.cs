@@ -1,6 +1,6 @@
-using Starlight.Protocol;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
+using Starlight.Protocol;
 
 namespace StarlightExporter.Official;
 
@@ -26,6 +26,8 @@ public sealed class OfficialPlayerLoginExchange
     private readonly OfficialPlayerLoginProfile _login;
     private readonly OfficialPlayerTokenResult _token;
     private bool _completed;
+
+    public OfficialGatePacketMetadata? RequestMetadata { get; private set; }
 
     public OfficialPlayerLoginExchange(
         ComboSession session,
@@ -65,7 +67,8 @@ public sealed class OfficialPlayerLoginExchange
         ulong loginRandom = BinaryPrimitives.ReadUInt64BigEndian(random);
         CryptographicOperations.ZeroMemory(random);
 
-        var request = new PlayerLoginReq {
+        var request = new PlayerLoginReq
+        {
             Token = _token.SessionToken.Reveal(),
             Checksum = _login.Checksum,
             UaPc = _login.UserAgent,
@@ -90,6 +93,7 @@ public sealed class OfficialPlayerLoginExchange
             ClientDataVersion = _region.ClientDataVersion,
             RegPlatform = _login.RegistrationPlatform,
         };
+        RequestMetadata = codec.Describe(request);
         return codec.EncodeEncrypted(request, cipher, metadata);
     }
 

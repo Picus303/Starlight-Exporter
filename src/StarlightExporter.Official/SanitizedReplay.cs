@@ -139,13 +139,22 @@ public static class SanitizedReplaySerializer
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        var file = new FileInfo(path);
-        if (file.Length > MaximumDocumentBytes)
+        byte[] json;
+        try
         {
-            throw ReplayFailure("The replay exceeds the document size limit.");
+            var file = new FileInfo(path);
+            if (file.Length > MaximumDocumentBytes)
+            {
+                throw ReplayFailure("The replay exceeds the document size limit.");
+            }
+
+            json = await File.ReadAllBytesAsync(path, cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw ReplayFailure("The replay could not be read.", exception);
         }
 
-        byte[] json = await File.ReadAllBytesAsync(path, cancellationToken);
         try
         {
             SnapshotSecurityGuard.EnsureNoSensitiveProperties(json);

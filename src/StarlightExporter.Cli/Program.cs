@@ -6,4 +6,4 @@ Console.CancelKeyPress += (_, eventArgs) => {
     cancellation.Cancel();
 };
 
-return await CliApplication.RunAsync(args, Console.Out, Console.Error, cancellation.Token);
+return await CliApplication.RunAsync(args, Console.In, Console.Out, Console.Error, cancellation.Token);

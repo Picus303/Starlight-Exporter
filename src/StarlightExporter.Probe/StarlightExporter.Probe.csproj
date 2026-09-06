@@ -9,8 +9,5 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../StarlightExporter.Official/StarlightExporter.Official.csproj" />
-    <ProjectReference Include="../StarlightExporter.StarlightTarget/StarlightExporter.StarlightTarget.csproj" />
-    <ProjectReference Include="../StarlightExporter.Persistence/StarlightExporter.Persistence.csproj" />
-    <ProjectReference Include="../StarlightExporter.Snapshot/StarlightExporter.Snapshot.csproj" />
   </ItemGroup>
 </Project>

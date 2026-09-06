@@ -1,5 +1,6 @@
-using Starlight.Protocol;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using Starlight.Protocol;
 
 namespace StarlightExporter.Official;
 
@@ -11,6 +12,7 @@ public sealed record OfficialGateSessionOptions
     public TimeSpan SynchronizationTimeout { get; init; } = TimeSpan.FromSeconds(30);
     public TimeSpan SynchronizationQuiescence { get; init; } = TimeSpan.FromSeconds(2);
     public int MaximumMessages { get; init; } = 4096;
+    public GateMetadataTrace? MetadataTrace { get; init; }
 }
 
 public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDisposable
@@ -21,6 +23,7 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
     private readonly OfficialGateSessionOptions _options;
     private readonly Queue<OfficialMessageEnvelope> _pending;
     private long _sequence;
+    private readonly long _traceStarted;
     private int _readStarted;
     private bool _disposed;
 
@@ -32,7 +35,8 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
         uint playerUid,
         string regionName,
         Queue<OfficialMessageEnvelope> pending,
-        long sequence)
+        long sequence,
+        long traceStarted)
     {
         _transport = transport;
         _cipher = cipher;
@@ -42,6 +46,7 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
         RegionName = regionName;
         _pending = pending;
         _sequence = sequence;
+        _traceStarted = traceStarted;
     }
 
     public uint PlayerUid { get; }
@@ -61,6 +66,7 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
         ArgumentNullException.ThrowIfNull(loginProfile);
         options ??= new OfficialGateSessionOptions();
         ValidateOptions(options);
+        long traceStarted = Stopwatch.GetTimestamp();
 
         OfficialKcpTransport? transport = null;
         OfficialGateCipherState? cipher = null;
@@ -77,9 +83,14 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
             using (OfficialPlayerTokenExchange tokenExchange =
                 OfficialPlayerTokenExchange.CreatePinned(session, region, clientProfile))
             {
-                await transport.SendAsync(
-                    tokenExchange.EncodeRequest(codec, cipher),
-                    cancellationToken);
+                byte[] tokenRequest = tokenExchange.EncodeRequest(codec, cipher);
+                AddTrace(
+                    options.MetadataTrace,
+                    traceStarted,
+                    GateTracePhase.PlayerToken,
+                    GateTraceDirection.ClientToServer,
+                    tokenExchange.RequestMetadata);
+                await transport.SendAsync(tokenRequest, cancellationToken);
                 OfficialGatePacket tokenPacket = await ReadPacketAsync(
                     transport,
                     codec,
@@ -88,6 +99,15 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
                     OfficialConnectivityError.PlayerTokenRejected,
                     "The Gate did not complete GetPlayerToken in time.",
                     cancellationToken);
+                AddTrace(
+                    options.MetadataTrace,
+                    traceStarted,
+                    GateTracePhase.PlayerToken,
+                    GateTraceDirection.ServerToClient,
+                    tokenPacket,
+                    tokenPacket.Message is GetPlayerTokenRsp tokenResponse
+                        ? tokenResponse.Retcode
+                        : null);
                 token = tokenExchange.CompleteResponse(tokenPacket, cipher);
             }
 
@@ -97,7 +117,14 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
                 clientProfile,
                 loginProfile,
                 token);
-            await transport.SendAsync(loginExchange.EncodeRequest(codec, cipher), cancellationToken);
+            byte[] loginRequest = loginExchange.EncodeRequest(codec, cipher);
+            AddTrace(
+                options.MetadataTrace,
+                traceStarted,
+                GateTracePhase.PlayerLogin,
+                GateTraceDirection.ClientToServer,
+                loginExchange.RequestMetadata);
+            await transport.SendAsync(loginRequest, cancellationToken);
 
             var pending = new Queue<OfficialMessageEnvelope>();
             long sequence = 0;
@@ -118,6 +145,18 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
                         "The Gate did not complete PlayerLogin in time.");
                 }
 
+                AddTrace(
+                    options.MetadataTrace,
+                    traceStarted,
+                    packet.Message is PlayerLoginRsp
+                        ? GateTracePhase.PlayerLogin
+                        : GateTracePhase.InitialSync,
+                    GateTraceDirection.ServerToClient,
+                    packet,
+                    packet.Message is PlayerLoginRsp loginResponse
+                        ? loginResponse.Retcode
+                        : null);
+
                 if (packet.Message is PlayerLoginRsp)
                 {
                     loginExchange.CompleteResponse(packet);
@@ -129,7 +168,8 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
                         token.PlayerUid,
                         region.RegionName,
                         pending,
-                        sequence);
+                        sequence,
+                        traceStarted);
                 }
 
                 pending.Enqueue(new OfficialMessageEnvelope(++sequence, packet.Message));
@@ -201,6 +241,12 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
             }
 
             OfficialGatePacket packet = _codec.DecodeEncrypted(encrypted, _cipher);
+            AddTrace(
+                _options.MetadataTrace,
+                _traceStarted,
+                GateTracePhase.InitialSync,
+                GateTraceDirection.ServerToClient,
+                packet);
             var next = new OfficialMessageEnvelope(++_sequence, packet.Message);
             Observe(next.Message, ref playerData, ref playerStore, ref avatarData);
             count++;
@@ -279,4 +325,37 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
     private static OfficialConnectivityException Failure(
         OfficialConnectivityError error,
         string message) => new(error, message);
+
+    private static void AddTrace(
+        GateMetadataTrace? trace,
+        long started,
+        GateTracePhase phase,
+        GateTraceDirection direction,
+        OfficialGatePacketMetadata? metadata)
+    {
+        if (trace is not null && metadata is not null)
+        {
+            trace.Add(
+                (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                phase,
+                direction,
+                metadata);
+        }
+    }
+
+    private static void AddTrace(
+        GateMetadataTrace? trace,
+        long started,
+        GateTracePhase phase,
+        GateTraceDirection direction,
+        OfficialGatePacket packet,
+        int? retcode = null)
+    {
+        trace?.Add(
+            (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+            phase,
+            direction,
+            packet,
+            retcode);
+    }
 }

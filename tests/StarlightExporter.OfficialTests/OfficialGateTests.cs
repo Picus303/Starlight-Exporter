@@ -1,10 +1,11 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Starlight.Crypto.Client;
 using Starlight.Ec2b;
 using Starlight.Kcp;
 using Starlight.Protocol;
 using StarlightExporter.Official;
-using System.Buffers.Binary;
-using System.Security.Cryptography;
 using Xunit;
 
 namespace StarlightExporter.OfficialTests;
@@ -92,6 +93,29 @@ public sealed class OfficialGateTests
     }
 
     [Fact]
+    public void MetadataTraceIsBoundedAndCannotContainPacketBodiesOrSecrets()
+    {
+        var trace = new GateMetadataTrace();
+        var metadata = new OfficialGatePacketMetadata(123, "PlayerDataNotify", 456);
+        for (int index = 0; index < GateMetadataTrace.MaximumRecords; index++)
+        {
+            trace.Add(index, GateTracePhase.InitialSync, GateTraceDirection.ServerToClient, metadata);
+        }
+
+        OfficialConnectivityException exception = Assert.Throws<OfficialConnectivityException>(() =>
+            trace.Add(4096, GateTracePhase.InitialSync, GateTraceDirection.ServerToClient, metadata));
+        string json = JsonSerializer.Serialize(trace.Records[0]);
+
+        Assert.Equal(OfficialConnectivityError.GatePacketInvalid, exception.Error);
+        Assert.DoesNotContain("payload", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("protobuf", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("token", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ticket", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("seed", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("pad", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void PacketCodecRejectsWrongPadWithStableError()
     {
         using OfficialGateCipherState writer = OfficialGateCipherState.FromRegion(Region("writer"));
@@ -175,7 +199,8 @@ public sealed class OfficialGateTests
         byte[] combinedSeed = new byte[sizeof(ulong)];
         BinaryPrimitives.WriteUInt64BigEndian(combinedSeed, clientSeed ^ serverSeed);
         Assert.True(serverCrypto.TryEncryptPayload(combinedSeed, 5, out string serverRandKey));
-        var response = new GetPlayerTokenRsp {
+        var response = new GetPlayerTokenRsp
+        {
             Uid = 123456789,
             AccountUid = "account-1",
             Token = "session-token",
@@ -244,7 +269,8 @@ public sealed class OfficialGateTests
             ComboSession.Create("account-1", "token"),
             region,
             OfficialClientProfile.OsGlobalV70);
-        byte[] responseBytes = codec.EncodeEncrypted(new GetPlayerTokenRsp {
+        byte[] responseBytes = codec.EncodeEncrypted(new GetPlayerTokenRsp
+        {
             Retcode = -201,
             AccountUid = "account-1",
             KeyId = 5,
@@ -278,7 +304,8 @@ public sealed class OfficialGateTests
         byte[] clientSeedCipher = Convert.FromBase64String(request.ClientRandKey);
         Assert.True(serverCrypto.TryDecryptWithSigningKey(clientSeedCipher, out byte[] clientSeed));
         Assert.True(serverCrypto.TryEncryptPayload(clientSeed, 5, out string serverRandKey));
-        byte[] responseBytes = codec.EncodeEncrypted(new GetPlayerTokenRsp {
+        byte[] responseBytes = codec.EncodeEncrypted(new GetPlayerTokenRsp
+        {
             Uid = 123456789,
             AccountUid = "account-1",
             Token = "session-token",
@@ -301,7 +328,8 @@ public sealed class OfficialGateTests
     private static OfficialCurrentRegion Region(string seed = "gate-test", string ticket = "")
     {
         byte[] secret = Ec2bKeyGen.Create(seed);
-        return new OfficialCurrentRegion {
+        return new OfficialCurrentRegion
+        {
             RegionName = "os_euro",
             GateServerIp = "192.0.2.1",
             GateServerPort = 22102,
@@ -322,7 +350,8 @@ public sealed class OfficialGateTests
         };
     }
 
-    private static OfficialPlayerLoginProfile LoginProfile() => new() {
+    private static OfficialPlayerLoginProfile LoginProfile() => new()
+    {
         PlatformName = "Windows",
         DeviceInfo = "synthetic-device",
         DeviceName = "synthetic-name",

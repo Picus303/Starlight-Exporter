@@ -30,6 +30,13 @@ public sealed record OfficialRegionList(
     byte[] ClientCustomConfigEncrypted,
     bool EnableLoginPc);
 
+public enum OfficialRegionalPayloadFormat
+{
+    Unknown,
+    DirectProtobuf,
+    EncryptedJsonEnvelope,
+}
+
 public sealed record OfficialCurrentRegion
 {
     public required string RegionName { get; init; }
@@ -49,6 +56,7 @@ public sealed record OfficialCurrentRegion
     public required string GameBiz { get; init; }
     public required string ResourceUrl { get; init; }
     public required string DataUrl { get; init; }
+    public OfficialRegionalPayloadFormat PayloadFormat { get; init; }
 
     public string GateHost => UseGateServerDomainName && !string.IsNullOrWhiteSpace(GateServerDomainName)
         ? GateServerDomainName

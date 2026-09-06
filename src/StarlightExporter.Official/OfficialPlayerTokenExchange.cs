@@ -1,7 +1,7 @@
-using Starlight.Crypto.Client;
-using Starlight.Protocol;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
+using Starlight.Crypto.Client;
+using Starlight.Protocol;
 
 namespace StarlightExporter.Official;
 
@@ -29,6 +29,8 @@ public sealed class OfficialPlayerTokenExchange : IDisposable
     private ulong _clientSeed;
     private bool _completed;
     private bool _disposed;
+
+    public OfficialGatePacketMetadata? RequestMetadata { get; private set; }
 
     private OfficialPlayerTokenExchange(
         ClientCrypto crypto,
@@ -105,7 +107,8 @@ public sealed class OfficialPlayerTokenExchange : IDisposable
 
         try
         {
-            var request = new GetPlayerTokenReq {
+            var request = new GetPlayerTokenReq
+            {
                 Ticket = _region.ConnectGateTicket.Reveal(),
                 ClientRandKey = Convert.ToBase64String(encryptedSeed),
                 AccountUid = _session.AccountUid,
@@ -120,6 +123,7 @@ public sealed class OfficialPlayerTokenExchange : IDisposable
                 SubChannelId = _profile.SubChannelId,
                 CountryCode = _session.CountryCode,
             };
+            RequestMetadata = codec.Describe(request);
             return codec.EncodeEncrypted(request, cipher, metadata);
         }
         finally

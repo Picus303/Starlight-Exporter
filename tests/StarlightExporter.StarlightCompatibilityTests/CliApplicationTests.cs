@@ -1,6 +1,9 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Starlight.Protocol;
 using StarlightExporter.Cli;
+using StarlightExporter.Official;
+using StarlightExporter.Persistence;
 using StarlightExporter.StarlightTarget;
 using Xunit;
 
@@ -215,25 +218,274 @@ public sealed class CliApplicationTests
     }
 
     [Fact]
-    public async Task AllocateUidModeIsRejectedUntilImplemented()
+    public async Task AllocateUidModeUsesDbGateStartingRange()
     {
+        string testDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "StarlightExporter.Tests",
+            Guid.NewGuid().ToString("N"));
+        string resourcesDirectory = Path.Combine(testDirectory, "resources");
+        string outputDirectory = Path.Combine(testDirectory, "output");
+        Directory.CreateDirectory(testDirectory);
+        TestResourceDirectory.Create(resourcesDirectory);
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        try
+        {
+            int exitCode = await CliApplication.RunAsync(
+                [
+                    "build-db",
+                    FixturePath("minimal-valid.json"),
+                    "--resources", resourcesDirectory,
+                    "--output", outputDirectory,
+                    "--private-account-id", "1",
+                    "--uid-mode", "allocate"
+                ],
+                output,
+                error);
+
+            Assert.Equal(CliApplication.Success, exitCode);
+            string reportJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "import-report.json"));
+            using JsonDocument report = JsonDocument.Parse(reportJson);
+            Assert.Equal(PlayerUidAllocator.FirstAllocatedUid, report.RootElement.GetProperty("privateUid").GetUInt32());
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CaptureReplayPublishesAValidatedSnapshot()
+    {
+        string testDirectory = CreateTestDirectory();
+        string replayPath = Path.Combine(testDirectory, "capture.replay.json");
+        string snapshotPath = Path.Combine(testDirectory, "snapshot.json");
+        await WriteReplayAsync(replayPath);
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        try
+        {
+            int exitCode = await CliApplication.RunAsync(
+                ["capture", "--replay", replayPath, "--output", snapshotPath],
+                output,
+                error);
+
+            Assert.Equal(CliApplication.Success, exitCode);
+            Assert.True(File.Exists(snapshotPath));
+            Assert.Equal(123456789u, (await Snapshot.OfficialSnapshotSerializer.ReadAsync(snapshotPath)).Manifest.OfficialUid);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CaptureReplayRefusesOverwriteAndPreservesExistingSnapshot()
+    {
+        string testDirectory = CreateTestDirectory();
+        string replayPath = Path.Combine(testDirectory, "capture.replay.json");
+        string snapshotPath = Path.Combine(testDirectory, "snapshot.json");
+        await WriteReplayAsync(replayPath);
+        await File.WriteAllTextAsync(snapshotPath, "existing");
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        try
+        {
+            int exitCode = await CliApplication.RunAsync(
+                ["capture", "--replay", replayPath, "--output", snapshotPath],
+                output,
+                error);
+
+            Assert.Equal(CliApplication.InvalidSnapshot, exitCode);
+            Assert.Equal("existing", await File.ReadAllTextAsync(snapshotPath));
+            Assert.Contains("SNAPSHOT_WRITE_FAILED", error.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CaptureReportsMissingReplayAsReplayFailure()
+    {
+        string testDirectory = CreateTestDirectory();
+        string snapshotPath = Path.Combine(testDirectory, "snapshot.json");
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        try
+        {
+            int exitCode = await CliApplication.RunAsync(
+                [
+                    "capture",
+                    "--replay", Path.Combine(testDirectory, "missing.replay.json"),
+                    "--output", snapshotPath
+                ],
+                output,
+                error);
+
+            Assert.Equal(CliApplication.InvalidReplay, exitCode);
+            Assert.False(File.Exists(snapshotPath));
+            Assert.Contains("REPLAY_INVALID", error.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportReplayCreatesPrivateIdentityDatabaseAndPlayerPackage()
+    {
+        const string privatePassword = "local-private-password";
+        string testDirectory = CreateTestDirectory();
+        string replayPath = Path.Combine(testDirectory, "capture.replay.json");
+        string snapshotPath = Path.Combine(testDirectory, "snapshot.json");
+        string resourcesDirectory = Path.Combine(testDirectory, "resources");
+        string outputDirectory = Path.Combine(testDirectory, "output");
+        await WriteReplayAsync(replayPath);
+        TestResourceDirectory.Create(resourcesDirectory);
+        using var input = new StringReader(privatePassword + Environment.NewLine);
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        try
+        {
+            int exitCode = await CliApplication.RunAsync(
+                [
+                    "export",
+                    "--replay", replayPath,
+                    "--snapshot-output", snapshotPath,
+                    "--resources", resourcesDirectory,
+                    "--output", outputDirectory,
+                    "--private-password-stdin",
+                    "--uid-mode", "allocate"
+                ],
+                input,
+                output,
+                error);
+
+            Assert.Equal(CliApplication.Success, exitCode);
+            Assert.True(File.Exists(snapshotPath));
+            Assert.Equal(
+                ["accounts.db", "import-report.json", "starlight.db"],
+                Directory.EnumerateFiles(outputDirectory).Select(path => Path.GetFileName(path)!).Order().ToArray());
+            PrivateAccountValidationResult account = await PrivateAccountValidator.ValidateExistsAsync(
+                Path.Combine(outputDirectory, "accounts.db"),
+                "1");
+            Assert.True(account.IsValid);
+
+            string reportJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "import-report.json"));
+            using JsonDocument report = JsonDocument.Parse(reportJson);
+            Assert.Equal(PlayerUidAllocator.FirstAllocatedUid, report.RootElement.GetProperty("privateUid").GetUInt32());
+            Assert.Equal("1", report.RootElement.GetProperty("privateAccountId").GetString());
+            Assert.DoesNotContain(privatePassword, output.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain(privatePassword, error.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain(privatePassword, reportJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportRetainsSnapshotWhenDatabaseStageFails()
+    {
+        string testDirectory = CreateTestDirectory();
+        string replayPath = Path.Combine(testDirectory, "capture.replay.json");
+        string snapshotPath = Path.Combine(testDirectory, "snapshot.json");
+        string outputDirectory = Path.Combine(testDirectory, "output");
+        await WriteReplayAsync(replayPath);
+        using var input = new StringReader("must-not-leak" + Environment.NewLine);
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        try
+        {
+            int exitCode = await CliApplication.RunAsync(
+                [
+                    "export",
+                    "--replay", replayPath,
+                    "--snapshot-output", snapshotPath,
+                    "--resources", Path.Combine(testDirectory, "missing-resources"),
+                    "--output", outputDirectory,
+                    "--private-password-stdin"
+                ],
+                input,
+                output,
+                error);
+
+            Assert.Equal(CliApplication.InvalidResources, exitCode);
+            Assert.True(File.Exists(snapshotPath));
+            Assert.False(Directory.Exists(outputDirectory));
+            Assert.Contains("snapshot was retained", error.ToString(), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("must-not-leak", error.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportRejectsPasswordArgumentWithoutEchoingItsValue()
+    {
+        const string secret = "must-not-echo";
         using var output = new StringWriter();
         using var error = new StringWriter();
 
         int exitCode = await CliApplication.RunAsync(
-            [
-                "build-db",
-                FixturePath("minimal-valid.json"),
-                "--resources", "resources.zip",
-                "--output", "output",
-                "--private-account-id", "1",
-                "--uid-mode", "allocate"
-            ],
+            ["export", "--private-password", secret],
             output,
             error);
 
         Assert.Equal(CliApplication.InvalidUsage, exitCode);
-        Assert.Contains("Only '--uid-mode preserve' is implemented", error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--private-password-stdin", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExportRejectsSnapshotInsideAtomicDatabaseDirectory()
+    {
+        string testDirectory = CreateTestDirectory();
+        string replayPath = Path.Combine(testDirectory, "capture.replay.json");
+        string outputDirectory = Path.Combine(testDirectory, "output");
+        await WriteReplayAsync(replayPath);
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        try
+        {
+            int exitCode = await CliApplication.RunAsync(
+                [
+                    "export",
+                    "--replay", replayPath,
+                    "--snapshot-output", Path.Combine(outputDirectory, "snapshot.json"),
+                    "--resources", Path.Combine(testDirectory, "resources"),
+                    "--output", outputDirectory,
+                    "--private-password-stdin"
+                ],
+                output,
+                error);
+
+            Assert.Equal(CliApplication.InvalidUsage, exitCode);
+            Assert.False(Directory.Exists(outputDirectory));
+            Assert.Contains("outside the database output directory", error.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
     }
 
     [Fact]
@@ -257,5 +509,58 @@ public sealed class CliApplicationTests
 
     private static string FixturePath(string fileName) =>
         Path.Combine(AppContext.BaseDirectory, "Fixtures", fileName);
+
+    private static string CreateTestDirectory()
+    {
+        string path = Path.Combine(
+            Path.GetTempPath(),
+            "StarlightExporter.Tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static Task WriteReplayAsync(string path)
+    {
+        var weapon = new Weapon { Level = 20, PromoteLevel = 0 };
+        weapon.AffixMap[101] = 2;
+        var avatar = new AvatarInfo {
+            AvatarId = 10000005,
+            Guid = 300,
+            BornTime = 1_700_000_000,
+            CoreProudSkillLevel = 2,
+            EquipGuidList = { 200 },
+            PropMap = {
+                [(uint)PlayerProperty.Level] = PlayerProperty.Level.Value(50),
+            },
+        };
+        OfficialMessageEnvelope[] messages = [
+            new(1, new PlayerDataNotify { NickName = "Traveler" }),
+            new(2, new PlayerStoreNotify {
+                ItemList = {
+                    new Item { ItemId = 1001, Guid = 100, Material = new Material { Count = 5 } },
+                    new Item {
+                        ItemId = 11101,
+                        Guid = 200,
+                        Equip = new Equip { Weapon = weapon },
+                    },
+                },
+            }),
+            new(3, new AvatarDataNotify {
+                CurAvatarTeamId = 1,
+                ChooseAvatarGuid = 300,
+                AvatarList = { avatar },
+                AvatarTeamMap = {
+                    [1] = new AvatarTeam { TeamName = "Main", AvatarGuidList = { 300 } },
+                },
+            }),
+        ];
+        var context = new OfficialCaptureContext(
+            123456789,
+            "os_euro",
+            new DateTimeOffset(2026, 9, 5, 12, 0, 0, TimeSpan.Zero),
+            new OfficialProfileSupplement("Synthetic profile", 10000005, 210001));
+        return SanitizedReplaySerializer.WriteNewAsync(path, context, messages);
+    }
 
 }

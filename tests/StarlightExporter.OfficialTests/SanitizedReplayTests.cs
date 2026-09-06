@@ -8,6 +8,23 @@ namespace StarlightExporter.OfficialTests;
 public sealed class SanitizedReplayTests
 {
     [Fact]
+    public void ConnectivityExceptionDoesNotExposeInnerExceptionOrData()
+    {
+        const string secret = "must-not-escape";
+        var exception = new OfficialConnectivityException(
+            OfficialConnectivityError.ComboExchangeRejected,
+            "Safe failure.",
+            new InvalidOperationException(secret));
+
+        Assert.Null(exception.InnerException);
+        Assert.Empty(exception.Data);
+        Assert.Equal(nameof(InvalidOperationException), exception.CauseType);
+        Assert.Equal("COMBO_EXCHANGE_REJECTED", OfficialConnectivityDiagnostic.Code(exception.Error));
+        Assert.DoesNotContain(secret, exception.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(secret, OfficialConnectivityDiagnostic.SafeMessage(exception.Error), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ReplayRoundTripFeedsCollectorAndProducesValidSnapshot()
     {
         using var directory = new TemporaryDirectory();

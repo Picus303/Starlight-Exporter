@@ -1,10 +1,10 @@
-using Starlight.Ec2b;
-using Starlight.Protobuf.Core;
-using Starlight.Protocol;
 using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Starlight.Ec2b;
+using Starlight.Protobuf.Core;
+using Starlight.Protocol;
 
 namespace StarlightExporter.Official;
 
@@ -13,7 +13,8 @@ public sealed class OfficialDispatchClient : IOfficialDispatchClient
     private const int MaximumResponseBytes = 2 * 1024 * 1024;
     private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(15);
 
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
         PropertyNameCaseInsensitive = false,
         RespectNullableAnnotations = true,
         RespectRequiredConstructorParameters = true,
@@ -126,7 +127,8 @@ public sealed class OfficialDispatchClient : IOfficialDispatchClient
             OfficialConnectivityError.GlobalDispatchUnavailable,
             cancellationToken);
 
-        byte[] payload = DecodeRegionalPayload(content, profile.KeyId);
+        (byte[] payload, OfficialRegionalPayloadFormat payloadFormat) =
+            DecodeRegionalPayload(content, profile.KeyId);
         QueryCurrRegionHttpRsp response;
         try
         {
@@ -170,7 +172,8 @@ public sealed class OfficialDispatchClient : IOfficialDispatchClient
                 "Regional dispatch returned an invalid EC2B secret key.");
         }
 
-        return new OfficialCurrentRegion {
+        return new OfficialCurrentRegion
+        {
             RegionName = selected.Name,
             GateServerIp = region.GateserverIp,
             GateServerPort = region.GateserverPort,
@@ -188,6 +191,7 @@ public sealed class OfficialDispatchClient : IOfficialDispatchClient
             GameBiz = region.GameBiz,
             ResourceUrl = region.ResourceUrl,
             DataUrl = region.DataUrl,
+            PayloadFormat = payloadFormat,
         };
     }
 
@@ -248,14 +252,18 @@ public sealed class OfficialDispatchClient : IOfficialDispatchClient
         }
     }
 
-    private byte[] DecodeRegionalPayload(string content, uint keyId)
+    private (byte[] Payload, OfficialRegionalPayloadFormat Format) DecodeRegionalPayload(
+        string content,
+        uint keyId)
     {
         if (!content.StartsWith('{'))
         {
-            return DecodeBase64(
-                content,
-                OfficialConnectivityError.RegionResponseInvalid,
-                "The regional dispatch response is not valid base64.");
+            return (
+                DecodeBase64(
+                    content,
+                    OfficialConnectivityError.RegionResponseInvalid,
+                    "The regional dispatch response is not valid base64."),
+                OfficialRegionalPayloadFormat.DirectProtobuf);
         }
 
         RegionalEnvelope envelope;
@@ -276,7 +284,9 @@ public sealed class OfficialDispatchClient : IOfficialDispatchClient
             envelope.Content,
             OfficialConnectivityError.RegionResponseInvalid,
             "The encrypted regional payload is not valid base64.");
-        return _crypto.DecryptAndVerify(ciphertext, envelope.Sign, keyId);
+        return (
+            _crypto.DecryptAndVerify(ciphertext, envelope.Sign, keyId),
+            OfficialRegionalPayloadFormat.EncryptedJsonEnvelope);
     }
 
     private static T ParseBase64<T>(

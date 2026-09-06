@@ -17,6 +17,75 @@ namespace StarlightExporter.Tests;
 public sealed class StarlightDatabaseWriterTests
 {
     [Fact]
+    public void PlayerUidAllocatorSeparatesPreservedAndPrivateRanges()
+    {
+        Assert.Equal(765432100u, PlayerUidAllocator.Resolve(PlayerUidMode.Preserve, 765432100));
+        Assert.Equal(
+            PlayerUidAllocator.FirstAllocatedUid,
+            PlayerUidAllocator.Resolve(PlayerUidMode.Allocate, 765432100));
+        Assert.Equal(
+            100000003u,
+            PlayerUidAllocator.Resolve(PlayerUidMode.Allocate, 765432100, [100000000, 100000002, 42]));
+        Assert.Throws<InvalidOperationException>(() =>
+            PlayerUidAllocator.Resolve(PlayerUidMode.Preserve, 765432100, [765432100]));
+    }
+
+    [Fact]
+    public async Task PrivateAccountDatabaseIsCreatedAtomicallyAndCanBeValidated()
+    {
+        const string password = "private-test-password";
+        string testDirectory = CreateTestDirectory();
+        string databasePath = Path.Combine(testDirectory, "accounts.db");
+
+        try
+        {
+            PrivateAccountWriteResult result = await PrivateAccountDatabaseWriter.WriteNewAsync(
+                databasePath,
+                "traveler-test",
+                password);
+
+            Assert.Equal(1u, result.AccountId);
+            Assert.Equal("traveler-test", result.Username);
+            Assert.True(File.Exists(databasePath));
+            Assert.Single(Directory.EnumerateFiles(testDirectory));
+            PrivateAccountValidationResult validation = await PrivateAccountValidator.ValidateExistsAsync(
+                databasePath,
+                result.AccountId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            Assert.True(validation.IsValid);
+            Assert.DoesNotContain(password, validation.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                password,
+                System.Text.Encoding.Latin1.GetString(await File.ReadAllBytesAsync(databasePath)),
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PrivateAccountDatabaseRejectsAnIncompatiblePasswordWithoutArtifacts()
+    {
+        string testDirectory = CreateTestDirectory();
+        string databasePath = Path.Combine(testDirectory, "accounts.db");
+
+        try
+        {
+            ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(() =>
+                PrivateAccountDatabaseWriter.WriteNewAsync(databasePath, "traveler-test", "short"));
+
+            Assert.Contains("8-50", exception.Message, StringComparison.Ordinal);
+            Assert.Empty(Directory.EnumerateFileSystemEntries(testDirectory));
+        }
+        finally
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task MappedSnapshotIsWrittenReadAndAcceptedByModules()
     {
         string testDirectory = CreateTestDirectory();

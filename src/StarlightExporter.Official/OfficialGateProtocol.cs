@@ -64,6 +64,11 @@ public sealed class OfficialGatePacket
         $"OfficialGatePacket {{ Type = {Message.GetType().Name}, CommandId = {CommandId}, BodyLength = {BodyLength} }}";
 }
 
+public sealed record OfficialGatePacketMetadata(
+    ushort CommandId,
+    string MessageType,
+    int SerializedBodyBytes);
+
 public sealed class OfficialGatePacketCodec
 {
     public const int MaximumPacketBytes = 1024 * 1024;
@@ -71,6 +76,29 @@ public sealed class OfficialGatePacketCodec
     private readonly ProtocolRegistry _registry = new V70ProtocolRegistry();
 
     public string ProtocolVersion => _registry.Version;
+
+    public OfficialGatePacketMetadata Describe(IMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        int commandId = _registry.GetCmdId(message);
+        if (commandId is <= 0 or > ushort.MaxValue)
+        {
+            throw Failure("The V70 message has an invalid command ID.");
+        }
+
+        byte[] body = OfficialV70FieldAliases.Serialize(_registry, message);
+        try
+        {
+            return new OfficialGatePacketMetadata(
+                checked((ushort)commandId),
+                message.GetType().Name,
+                body.Length);
+        }
+        finally
+        {
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(body);
+        }
+    }
 
     public byte[] EncodeEncrypted(
         IMessage message,

@@ -1,12 +1,12 @@
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Google.Protobuf;
 using Starlight.Ec2b;
 using Starlight.Protobuf.Core;
 using Starlight.Protocol;
 using StarlightExporter.Official;
-using System.Net;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using Xunit;
 
 namespace StarlightExporter.OfficialTests;
@@ -18,9 +18,11 @@ public sealed class OfficialDispatchTests
     {
         byte[] regionalPayload = CreateRegionalResponse().ToByteArray();
         var crypto = new PassThroughCrypto(regionalPayload);
-        var handler = new StubHttpHandler(request => request.RequestUri!.Host switch {
+        var handler = new StubHttpHandler(request => request.RequestUri!.Host switch
+        {
             "global.test" => TextResponse(CreateGlobalResponse("https://euro.test/query_cur_region")),
-            "euro.test" => TextResponse(JsonSerializer.Serialize(new {
+            "euro.test" => TextResponse(JsonSerializer.Serialize(new
+            {
                 content = Convert.ToBase64String("ciphertext"u8),
                 sign = Convert.ToBase64String("signature"u8),
             })),
@@ -34,6 +36,7 @@ public sealed class OfficialDispatchTests
         Assert.Equal("gate.example.test", region.GateHost);
         Assert.Equal(22102u, region.GateServerPort);
         Assert.Equal("hk4e_global", region.GameBiz);
+        Assert.Equal(OfficialRegionalPayloadFormat.EncryptedJsonEnvelope, region.PayloadFormat);
         Assert.True(Ec2bKeyGen.HasValidLayout(region.ClientSecretKey));
         Assert.DoesNotContain("test-ticket", region.ToString(), StringComparison.Ordinal);
         Assert.True(crypto.WasCalled);
@@ -65,7 +68,8 @@ public sealed class OfficialDispatchTests
     [Fact]
     public async Task ResolveRegionRejectsDirectErrorProtobuf()
     {
-        var handler = new StubHttpHandler(request => request.RequestUri!.Host switch {
+        var handler = new StubHttpHandler(request => request.RequestUri!.Host switch
+        {
             "global.test" => TextResponse(CreateGlobalResponse("https://euro.test/query_cur_region")),
             "euro.test" => TextResponse("CAE="),
             _ => new HttpResponseMessage(HttpStatusCode.NotFound),
@@ -99,7 +103,8 @@ public sealed class OfficialDispatchTests
     public async Task ResolveRegionAcceptsDirectSuccessfulProtobuf()
     {
         var crypto = new PassThroughCrypto([]);
-        var handler = new StubHttpHandler(request => request.RequestUri!.Host switch {
+        var handler = new StubHttpHandler(request => request.RequestUri!.Host switch
+        {
             "global.test" => TextResponse(CreateGlobalResponse("https://euro.test/query_cur_region")),
             "euro.test" => TextResponse(Convert.ToBase64String(CreateRegionalResponse().ToByteArray())),
             _ => new HttpResponseMessage(HttpStatusCode.NotFound),
@@ -110,16 +115,53 @@ public sealed class OfficialDispatchTests
         OfficialCurrentRegion result = await subject.ResolveRegionAsync(Profile(), "os_euro");
 
         Assert.Equal("gate.example.test", result.GateHost);
+        Assert.Equal(OfficialRegionalPayloadFormat.DirectProtobuf, result.PayloadFormat);
         Assert.False(crypto.WasCalled);
+    }
+
+    [Fact]
+    public async Task DispatchProbeReturnsOnlySanitizedMetadata()
+    {
+        byte[] regionalPayload = CreateRegionalResponse().ToByteArray();
+        var handler = new StubHttpHandler(request => request.RequestUri!.Host switch
+        {
+            "global.test" => TextResponse(CreateGlobalResponse("https://euro.test/query_cur_region")),
+            "euro.test" => TextResponse(JsonSerializer.Serialize(new
+            {
+                content = Convert.ToBase64String("ciphertext"u8),
+                sign = Convert.ToBase64String("signature"u8),
+            })),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound),
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new OfficialDispatchClient(
+            httpClient,
+            new PassThroughCrypto(regionalPayload),
+            new FixedTimeProvider());
+        var subject = new OfficialDispatchProbe(client);
+
+        DispatchListProbeResult list = await subject.ProbeListAsync(Profile());
+        RegionalDispatchProbeResult region = await subject.ProbeRegionAsync(Profile(), "os_euro");
+
+        Assert.Equal("OSRELWin7.0.0", list.Version);
+        Assert.Equal(2076, list.ClientSecretKeyBytes);
+        Assert.Equal("os_euro", Assert.Single(list.Regions).Name);
+        Assert.True(region.ConnectGateTicketPresent);
+        Assert.True(region.GateHostPresent);
+        Assert.Equal(OfficialRegionalPayloadFormat.EncryptedJsonEnvelope, region.PayloadFormat);
+        Assert.DoesNotContain("test-ticket", JsonSerializer.Serialize(region), StringComparison.Ordinal);
+        Assert.DoesNotContain("gate.example.test", JsonSerializer.Serialize(region), StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task GetRegionsRejectsInvalidEc2bMaterial()
     {
-        var response = new QueryRegionListHttpRsp {
+        var response = new QueryRegionListHttpRsp
+        {
             ClientSecretKey = ByteString.CopyFrom(new byte[2076]),
         };
-        response.RegionList.Add(new RegionSimpleInfo {
+        response.RegionList.Add(new RegionSimpleInfo
+        {
             Name = "os_euro",
             Title = "Europe",
             Type = "DEV_PUBLIC",
@@ -138,7 +180,8 @@ public sealed class OfficialDispatchTests
     [Fact]
     public async Task DispatchTimeoutHasAStableDomainError()
     {
-        var handler = new StubHttpHandler(async (_, cancellationToken) => {
+        var handler = new StubHttpHandler(async (_, cancellationToken) =>
+        {
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
@@ -191,22 +234,62 @@ public sealed class OfficialDispatchTests
         OfficialConnectivityException exception = Assert.Throws<OfficialConnectivityException>(() =>
             subject.DecryptAndVerify(encrypted, Convert.ToBase64String(new byte[256]), keyId: 5));
 
-        Assert.Equal(OfficialConnectivityError.RegionCryptoUnsupported, exception.Error);
+        Assert.Equal(OfficialConnectivityError.RegionSignatureMismatch, exception.Error);
         Assert.DoesNotContain("regional-data", exception.ToString(), StringComparison.Ordinal);
     }
 
-    private static OfficialClientProfile Profile() => OfficialClientProfile.OsGlobalV70 with {
+    [Fact]
+    public void PinnedCryptoAcceptsAnExternalPublicVerificationKey()
+    {
+        byte[] plaintext = "regional-data"u8.ToArray();
+        using var producer = Starlight.Crypto.Client.ClientCrypto.Create(generateRsaKeys: false);
+        byte[] encrypted = producer.ContentKeys[5].Encrypt(plaintext, RSAEncryptionPadding.Pkcs1);
+        using RSA signer = RSA.Create(2048);
+        string signature = Convert.ToBase64String(signer.SignData(
+            plaintext,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1));
+        using StarlightRegionCrypto subject =
+            StarlightRegionCrypto.CreatePinnedWithVerificationKey(signer.ExportSubjectPublicKeyInfoPem());
+
+        byte[] result = subject.DecryptAndVerify(encrypted, signature, keyId: 5);
+
+        Assert.Equal(plaintext, result);
+    }
+
+    [Fact]
+    public void PinnedCryptoClassifiesUnexpectedCiphertextSignatureContract()
+    {
+        byte[] plaintext = "regional-data"u8.ToArray();
+        using var producer = Starlight.Crypto.Client.ClientCrypto.Create(generateRsaKeys: false);
+        byte[] encrypted = producer.ContentKeys[5].Encrypt(plaintext, RSAEncryptionPadding.Pkcs1);
+        string signature = Convert.ToBase64String(producer.SigningKey!.SignData(
+            encrypted,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1));
+        using StarlightRegionCrypto subject = StarlightRegionCrypto.CreatePinned();
+
+        OfficialConnectivityException exception = Assert.Throws<OfficialConnectivityException>(() =>
+            subject.DecryptAndVerify(encrypted, signature, keyId: 5));
+
+        Assert.Equal(OfficialConnectivityError.RegionSignatureContractMismatch, exception.Error);
+    }
+
+    private static OfficialClientProfile Profile() => OfficialClientProfile.OsGlobalV70 with
+    {
         GlobalDispatchUri = new Uri("https://global.test/query_region_list"),
     };
 
     private static string CreateGlobalResponse(string dispatchUrl)
     {
-        var response = new QueryRegionListHttpRsp {
+        var response = new QueryRegionListHttpRsp
+        {
             ClientSecretKey = ByteString.CopyFrom(Ec2bKeyGen.Create("global-test")),
             ClientCustomConfigEncrypted = ByteString.CopyFrom(new byte[] { 4, 5 }),
             EnableLoginPc = true,
         };
-        response.RegionList.Add(new RegionSimpleInfo {
+        response.RegionList.Add(new RegionSimpleInfo
+        {
             Name = "os_euro",
             Title = "Europe",
             Type = "DEV_PUBLIC",
@@ -215,10 +298,12 @@ public sealed class OfficialDispatchTests
         return Convert.ToBase64String(response.ToByteArray());
     }
 
-    private static QueryCurrRegionHttpRsp CreateRegionalResponse() => new() {
+    private static QueryCurrRegionHttpRsp CreateRegionalResponse() => new()
+    {
         ClientSecretKey = ByteString.CopyFrom(Ec2bKeyGen.Create("region-test")),
         ConnectGateTicket = "test-ticket",
-        RegionInfo = new RegionInfo {
+        RegionInfo = new RegionInfo
+        {
             GateserverIp = "192.0.2.1",
             GateserverPort = 22102,
             UseGateserverDomainName = true,
@@ -236,7 +321,8 @@ public sealed class OfficialDispatchTests
         },
     };
 
-    private static HttpResponseMessage TextResponse(string content) => new(HttpStatusCode.OK) {
+    private static HttpResponseMessage TextResponse(string content) => new(HttpStatusCode.OK)
+    {
         Content = new StringContent(content, Encoding.UTF8, "text/plain"),
     };
 
