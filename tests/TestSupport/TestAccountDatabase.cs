@@ -15,7 +15,8 @@ internal static class TestAccountDatabase
 
         await using var database = new SdkDbContext(options);
         await database.Database.EnsureCreatedAsync();
-        database.Accounts.AddRange(accountIds.Select(id => new Account {
+        database.Accounts.AddRange(accountIds.Select(id => new Account
+        {
             Id = id,
             Username = $"test-{id}"
         }));
@@ -34,7 +35,8 @@ internal static class TestAccountDatabase
 
         await using var database = new SdkDbContext(options);
         await database.Database.EnsureCreatedAsync();
-        database.Accounts.Add(new Account {
+        database.Accounts.Add(new Account
+        {
             Id = accountId,
             Username = username,
             PasswordHash = Argon2Crypto.Hash(password),

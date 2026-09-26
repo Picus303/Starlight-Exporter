@@ -39,7 +39,8 @@ public static class CliApplication
 
         try
         {
-            return arguments switch {
+            return arguments switch
+            {
                 ["inspect", ..] => await InspectAsync(arguments, output, error, cancellationToken),
                 ["capture", ..] => await CaptureAsync(arguments, output, error, cancellationToken),
                 ["build-db", ..] => await BuildDatabaseAsync(arguments, output, error, cancellationToken),
@@ -551,14 +552,15 @@ public static class CliApplication
         string? replay = null;
         string? output = null;
 
-        if (!TryParseNamedValues(arguments, 1, (name, value) => {
-                switch (name)
-                {
-                    case "--replay": replay = value; return true;
-                    case "--output": output = value; return true;
-                    default: return false;
-                }
-            }, out error))
+        if (!TryParseNamedValues(arguments, 1, (name, value) =>
+        {
+            switch (name)
+            {
+                case "--replay": replay = value; return true;
+                case "--output": output = value; return true;
+                default: return false;
+            }
+        }, out error))
         {
             return false;
         }

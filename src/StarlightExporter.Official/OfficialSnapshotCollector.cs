@@ -1,6 +1,6 @@
+using System.Globalization;
 using Starlight.Protocol;
 using StarlightExporter.Snapshot;
-using System.Globalization;
 
 namespace StarlightExporter.Official;
 
@@ -17,72 +17,25 @@ public sealed class OfficialSnapshotCollector
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(source);
 
-        PlayerDataNotify? playerData = null;
-        bool receivedStore = false;
-        bool receivedAvatars = false;
-        var items = new Dictionary<ulong, Item>();
-        var avatars = new Dictionary<ulong, AvatarInfo>();
-        var teams = new Dictionary<uint, AvatarTeam>();
-        uint currentTeamId = 0;
-        ulong chosenAvatarGuid = 0;
+        var cache = new OfficialSnapshotCache();
+        var social = new OfficialSocialProfileTracker(context.OfficialUid);
 
         await foreach (OfficialMessageEnvelope envelope in source.ReadAllAsync(cancellationToken))
         {
-            switch (envelope.Message)
-            {
-                case PlayerDataNotify player:
-                    playerData = player;
-                    break;
-
-                case PlayerStoreNotify store:
-                    receivedStore = true;
-                    foreach (Item item in store.ItemList)
-                    {
-                        if (item.Guid != 0)
-                        {
-                            items[item.Guid] = item;
-                        }
-                    }
-                    break;
-
-                case AvatarDataNotify avatarData:
-                    receivedAvatars = true;
-                    foreach (AvatarInfo avatar in avatarData.AvatarList)
-                    {
-                        if (avatar.Guid != 0)
-                        {
-                            avatars[avatar.Guid] = avatar;
-                        }
-                    }
-
-                    foreach ((uint id, AvatarTeam team) in avatarData.AvatarTeamMap)
-                    {
-                        teams[id] = team;
-                    }
-
-                    if (avatarData.CurAvatarTeamId != 0)
-                    {
-                        currentTeamId = avatarData.CurAvatarTeamId;
-                    }
-
-                    if (avatarData.ChooseAvatarGuid != 0)
-                    {
-                        chosenAvatarGuid = avatarData.ChooseAvatarGuid;
-                    }
-                    break;
-            }
+            social.Observe(envelope.Message);
+            cache.Observe(envelope.Message);
         }
 
         var missing = new List<string>();
-        if (playerData is null)
+        if (cache.PlayerData is null)
         {
             missing.Add(nameof(PlayerDataNotify));
         }
-        if (!receivedStore)
+        if (cache.PackItems.Count == 0)
         {
-            missing.Add(nameof(PlayerStoreNotify));
+            missing.Add($"{nameof(PlayerStoreNotify)}(StorePack)");
         }
-        if (!receivedAvatars)
+        if (cache.Avatars.Count == 0)
         {
             missing.Add(nameof(AvatarDataNotify));
         }
@@ -93,17 +46,18 @@ public sealed class OfficialSnapshotCollector
                 $"The synchronization is incomplete: {string.Join(", ", missing)} missing.");
         }
 
+        PlayerDataNotify playerData = cache.PlayerData!;
         var unsupported = new List<UnsupportedRecord>();
-        List<SnapshotMaterial> materials = MapMaterials(items.Values, unsupported);
-        List<SnapshotWeapon> weapons = MapWeapons(items.Values, unsupported);
+        List<SnapshotMaterial> materials = MapMaterials(cache.PackItems.Values, unsupported);
+        List<SnapshotWeapon> weapons = MapWeapons(cache.PackItems.Values, unsupported);
         HashSet<ulong> weaponGuids = weapons.Select(weapon => weapon.Guid).ToHashSet();
-        List<SnapshotAvatar> snapshotAvatars = MapAvatars(avatars.Values, weaponGuids, unsupported);
+        List<SnapshotAvatar> snapshotAvatars = MapAvatars(cache.Avatars.Values, weaponGuids, unsupported);
         HashSet<ulong> avatarGuids = snapshotAvatars.Select(avatar => avatar.Guid).ToHashSet();
         List<SnapshotTeam> snapshotTeams = MapTeams(
-            teams,
+            cache.Teams,
             avatarGuids,
-            currentTeamId,
-            chosenAvatarGuid,
+            cache.CurrentTeamId,
+            cache.ChosenAvatarGuid,
             unsupported);
 
         uint bornAvatarId = snapshotAvatars
@@ -116,7 +70,7 @@ public sealed class OfficialSnapshotCollector
                 "The synchronized avatar list does not contain Aether or Lumine.");
         }
 
-        if (string.IsNullOrWhiteSpace(playerData!.NickName))
+        if (string.IsNullOrWhiteSpace(playerData.NickName))
         {
             throw Failure(
                 OfficialConnectivityError.CapturedDataInvalid,
@@ -126,27 +80,39 @@ public sealed class OfficialSnapshotCollector
         OfficialProfileSupplement? profile = context.Profile;
         if (profile is null)
         {
-            unsupported.Add(new UnsupportedRecord("profile", "signature", "Profile source not captured yet."));
-            unsupported.Add(new UnsupportedRecord("profile", "pictureId", "Profile source not captured yet."));
-            unsupported.Add(new UnsupportedRecord("profile", "nameCardId", "Profile source not captured yet."));
+            if (social.Signature.State == OfficialProfileFieldState.Unknown)
+            {
+                unsupported.Add(new UnsupportedRecord("profile", "signature", "Profile source not captured yet."));
+            }
+            if (social.PictureId.State == OfficialProfileFieldState.Unknown)
+            {
+                unsupported.Add(new UnsupportedRecord("profile", "pictureId", "Profile source not captured yet."));
+            }
+            if (social.NameCardId.State == OfficialProfileFieldState.Unknown)
+            {
+                unsupported.Add(new UnsupportedRecord("profile", "nameCardId", "Profile source not captured yet."));
+            }
         }
 
-        var snapshot = new OfficialSnapshot {
-            Manifest = new SnapshotManifest {
+        var snapshot = new OfficialSnapshot
+        {
+            Manifest = new SnapshotManifest
+            {
                 SchemaVersion = SnapshotContract.CurrentSchemaVersion,
                 SourceProtocolVersion = SnapshotContract.SupportedSourceProtocolVersion,
                 CapturedAtUtc = context.CapturedAtUtc,
                 Region = context.Region,
                 OfficialUid = context.OfficialUid,
             },
-            Player = new SnapshotPlayer {
+            Player = new SnapshotPlayer
+            {
                 Nickname = playerData.NickName,
-                Signature = profile?.Signature ?? string.Empty,
-                PictureId = profile?.PictureId ?? 0,
-                NameCardId = profile?.NameCardId ?? 0,
+                Signature = profile?.Signature ?? social.Signature.Value,
+                PictureId = profile?.PictureId ?? social.PictureId.Value,
+                NameCardId = profile?.NameCardId ?? social.NameCardId.Value,
                 BornState = SnapshotBornState.Complete,
                 BornAvatarId = bornAvatarId,
-                CurrentAvatarTeamId = currentTeamId,
+                CurrentAvatarTeamId = cache.CurrentTeamId,
             },
             Materials = materials,
             Weapons = weapons,

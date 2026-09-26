@@ -45,7 +45,8 @@ public sealed record OfficialCurrentRegion
     public required bool UseGateServerDomainName { get; init; }
     public required string GateServerDomainName { get; init; }
     public required byte[] ClientSecretKey { get; init; }
-    public required byte[] SecretKey { get; init; }
+    // Retained only as parsed diagnostic metadata. Gate key derivation must never use it.
+    public byte[] SecretKey { get; init; } = [];
     public required OfficialSecret ConnectGateTicket { get; init; }
     public required uint ClientDataVersion { get; init; }
     public required uint ClientSilenceDataVersion { get; init; }
@@ -61,4 +62,6 @@ public sealed record OfficialCurrentRegion
     public string GateHost => UseGateServerDomainName && !string.IsNullOrWhiteSpace(GateServerDomainName)
         ? GateServerDomainName
         : GateServerIp;
+
+    public override string ToString() => "OfficialCurrentRegion { Endpoint = [REDACTED], Secrets = [REDACTED] }";
 }

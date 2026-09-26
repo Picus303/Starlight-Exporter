@@ -14,4 +14,7 @@
     <ProjectReference Include="../../vendor/Starlight/Libraries/Starlight.Ec2b/Starlight.Ec2b.csproj" />
     <ProjectReference Include="../../vendor/Starlight/Libraries/Starlight.Kcp/Starlight.Kcp.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="StarlightExporter.OfficialTests" />
+  </ItemGroup>
 </Project>

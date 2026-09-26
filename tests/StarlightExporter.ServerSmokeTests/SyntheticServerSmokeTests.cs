@@ -117,7 +117,8 @@ public sealed class SyntheticServerSmokeTests
         int sdkPort,
         int gatePort)
     {
-        var startInfo = new ProcessStartInfo("dotnet") {
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
             WorkingDirectory = workingDirectory,
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -177,7 +178,8 @@ public sealed class SyntheticServerSmokeTests
         client.DefaultRequestHeaders.Add("x-rpc-language", "en");
         using HttpResponseMessage response = await client.PostAsJsonAsync(
             $"http://{IPAddress.Loopback}:{sdkPort}/hk4e_global/mdk/shield/api/login",
-            new {
+            new
+            {
                 account = SyntheticUsername,
                 password = SyntheticPassword,
                 is_crypto = false,
@@ -210,7 +212,8 @@ public sealed class SyntheticServerSmokeTests
     }
 
     private static string SqliteConnectionString(string path) =>
-        new SqliteConnectionStringBuilder {
+        new SqliteConnectionStringBuilder
+        {
             DataSource = path,
             Mode = SqliteOpenMode.ReadWrite,
             Pooling = false

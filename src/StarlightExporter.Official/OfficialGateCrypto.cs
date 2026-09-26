@@ -1,7 +1,7 @@
-using Starlight.Ec2b;
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using Starlight.Ec2b;
 
 namespace StarlightExporter.Official;
 
@@ -12,12 +12,12 @@ public static class OfficialGateKeySchedule
     public static byte[] DeriveInitialPad(OfficialCurrentRegion region)
     {
         ArgumentNullException.ThrowIfNull(region);
-        if (!Ec2bKeyGen.HasValidLayout(region.SecretKey))
+        if (!Ec2bKeyGen.HasValidLayout(region.ClientSecretKey))
         {
             throw Failure("The regional Gate secret is not a valid EC2B buffer.");
         }
 
-        byte[] pad = Ec2bHelper.Derive(region.SecretKey);
+        byte[] pad = Ec2bHelper.Derive(region.ClientSecretKey);
         if (pad.Length != PadLength)
         {
             CryptographicOperations.ZeroMemory(pad);

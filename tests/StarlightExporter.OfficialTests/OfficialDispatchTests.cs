@@ -42,8 +42,11 @@ public sealed class OfficialDispatchTests
         Assert.True(crypto.WasCalled);
         Uri regionalUri = Assert.Single(handler.Requests, uri => uri.Host == "euro.test");
         Assert.Contains("key_id=5", regionalUri.Query, StringComparison.Ordinal);
-        Assert.Contains("aid=4", regionalUri.Query, StringComparison.Ordinal);
-        Assert.Contains("version=OSRELWin7.0.0", regionalUri.Query, StringComparison.Ordinal);
+        Assert.DoesNotContain("aid=4", regionalUri.Query, StringComparison.Ordinal);
+        Assert.Contains("account_type=0", regionalUri.Query, StringComparison.Ordinal);
+        Assert.Equal(
+            "?version=7.0.0&lang=4&platform=3&binary=1&time=123&channel_id=1&sub_channel_id=0&account_type=0&dispatchSeed=a581ee28ea5494e6&key_id=5",
+            regionalUri.Query);
     }
 
     [Fact]
@@ -62,7 +65,55 @@ public sealed class OfficialDispatchTests
         Assert.Equal(2076, result.ClientSecretKey.Length);
         Assert.Equal(new byte[] { 4, 5 }, result.ClientCustomConfigEncrypted);
         Assert.True(result.EnableLoginPc);
-        Assert.Contains("time=1788566400", Assert.Single(handler.Requests).Query, StringComparison.Ordinal);
+        Assert.Contains("time=123", Assert.Single(handler.Requests).Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RegionalDispatchPropagatesComboIdentityAndBuildSeed()
+    {
+        byte[] regionalPayload = CreateRegionalResponse().ToByteArray();
+        var handler = new StubHttpHandler(request => request.RequestUri!.Host switch
+        {
+            "global.test" => TextResponse(CreateGlobalResponse("https://euro.test/query_cur_region")),
+            "euro.test" => TextResponse(JsonSerializer.Serialize(new
+            {
+                content = Convert.ToBase64String("ciphertext"u8),
+                sign = Convert.ToBase64String("signature"u8),
+            })),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound),
+        });
+        using var client = new HttpClient(handler);
+        var dispatch = new OfficialDispatchClient(
+            client, new PassThroughCrypto(regionalPayload), new FixedTimeProvider());
+
+        await dispatch.ResolveRegionAsync(
+            Profile(), "os_euro", ComboSession.Create("combo-open-id", "combo-token", accountType: 2));
+
+        Uri regional = Assert.Single(handler.Requests, uri => uri.Host == "euro.test");
+        Assert.Contains("aid=combo-open-id", regional.Query, StringComparison.Ordinal);
+        Assert.Contains("account_type=2", regional.Query, StringComparison.Ordinal);
+        Assert.Contains("dispatchSeed=a581ee28ea5494e6", regional.Query, StringComparison.Ordinal);
+        Assert.Contains("version=7.0.0", regional.Query, StringComparison.Ordinal);
+        Assert.Contains("lang=4", regional.Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AuthenticatedRegionalDispatchRejectsDirectProtobufFallback()
+    {
+        var handler = new StubHttpHandler(request => request.RequestUri!.Host switch
+        {
+            "global.test" => TextResponse(CreateGlobalResponse("https://euro.test/query_cur_region")),
+            "euro.test" => TextResponse(Convert.ToBase64String(CreateRegionalResponse().ToByteArray())),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound),
+        });
+        using var client = new HttpClient(handler);
+        var dispatch = new OfficialDispatchClient(client, new PassThroughCrypto([]), new FixedTimeProvider());
+
+        OfficialConnectivityException exception = await Assert.ThrowsAsync<OfficialConnectivityException>(() =>
+            dispatch.ResolveRegionAsync(
+                Profile(), "os_euro", ComboSession.Create("combo-open-id", "combo-token")));
+
+        Assert.Equal(OfficialConnectivityError.RegionResponseInvalid, exception.Error);
     }
 
     [Fact]
@@ -80,7 +131,8 @@ public sealed class OfficialDispatchTests
         OfficialConnectivityException exception = await Assert.ThrowsAsync<OfficialConnectivityException>(
             () => subject.ResolveRegionAsync(Profile(), "os_euro"));
 
-        Assert.Equal(OfficialConnectivityError.ClientVersionRejected, exception.Error);
+        Assert.Equal(OfficialConnectivityError.RegionalDispatchRejected, exception.Error);
+        Assert.Equal(1, exception.Retcode);
         Assert.Contains("retcode 1", exception.Message, StringComparison.Ordinal);
     }
 
@@ -216,7 +268,8 @@ public sealed class OfficialDispatchTests
             plaintext,
             HashAlgorithmName.SHA256,
             RSASignaturePadding.Pkcs1));
-        using StarlightRegionCrypto subject = StarlightRegionCrypto.CreatePinned();
+        using StarlightRegionCrypto subject = StarlightRegionCrypto.CreatePinnedWithVerificationKey(
+            producer.SigningKey!.ExportSubjectPublicKeyInfoPem());
 
         byte[] result = subject.DecryptAndVerify(encrypted.ToArray(), signature, keyId: 5);
 
@@ -229,7 +282,8 @@ public sealed class OfficialDispatchTests
         byte[] plaintext = "regional-data"u8.ToArray();
         using var producer = Starlight.Crypto.Client.ClientCrypto.Create(generateRsaKeys: false);
         byte[] encrypted = producer.ContentKeys[5].Encrypt(plaintext, RSAEncryptionPadding.Pkcs1);
-        using StarlightRegionCrypto subject = StarlightRegionCrypto.CreatePinned();
+        using StarlightRegionCrypto subject = StarlightRegionCrypto.CreatePinnedWithVerificationKey(
+            producer.SigningKey!.ExportSubjectPublicKeyInfoPem());
 
         OfficialConnectivityException exception = Assert.Throws<OfficialConnectivityException>(() =>
             subject.DecryptAndVerify(encrypted, Convert.ToBase64String(new byte[256]), keyId: 5));
@@ -267,7 +321,8 @@ public sealed class OfficialDispatchTests
             encrypted,
             HashAlgorithmName.SHA256,
             RSASignaturePadding.Pkcs1));
-        using StarlightRegionCrypto subject = StarlightRegionCrypto.CreatePinned();
+        using StarlightRegionCrypto subject = StarlightRegionCrypto.CreatePinnedWithVerificationKey(
+            producer.SigningKey!.ExportSubjectPublicKeyInfoPem());
 
         OfficialConnectivityException exception = Assert.Throws<OfficialConnectivityException>(() =>
             subject.DecryptAndVerify(encrypted, signature, keyId: 5));
@@ -369,6 +424,6 @@ public sealed class OfficialDispatchTests
     private sealed class FixedTimeProvider : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() =>
-            new(2026, 9, 5, 0, 0, 0, TimeSpan.Zero);
+            new(2026, 9, 5, 0, 0, 0, 123, TimeSpan.Zero);
     }
 }

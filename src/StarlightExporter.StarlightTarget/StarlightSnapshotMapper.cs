@@ -18,14 +18,17 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
             error.Code,
             error.Message)));
 
-        var profile = new NetPlayerProfile {
+        var profile = new NetPlayerProfile
+        {
             Nickname = snapshot.Player.Nickname,
             Signature = snapshot.Player.Signature,
             PictureId = snapshot.Player.PictureId,
             NameCardId = snapshot.Player.NameCardId
         };
-        var state = new NetPlayerState {
-            BornState = snapshot.Player.BornState switch {
+        var state = new NetPlayerState
+        {
+            BornState = snapshot.Player.BornState switch
+            {
                 SnapshotBornState.Pending => NetPlayerState.Types.PlayerBornState.Pending,
                 SnapshotBornState.Complete => NetPlayerState.Types.PlayerBornState.Complete,
                 _ => NetPlayerState.Types.PlayerBornState.Unspecified
@@ -92,7 +95,8 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
                     $"Material {source.ItemId} count was clamped from {source.Count} to {count}."));
             }
 
-            state.Materials.Add(new NetMaterial {
+            state.Materials.Add(new NetMaterial
+            {
                 ItemId = source.ItemId,
                 Guid = source.Guid,
                 Count = count
@@ -161,7 +165,8 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
                     $"Weapon {source.Guid} metadata was replaced with values from the target resources."));
             }
 
-            state.Weapons.Add(new NetWeapon {
+            state.Weapons.Add(new NetWeapon
+            {
                 ItemId = source.ItemId,
                 Guid = source.Guid,
                 Level = source.Level,
@@ -209,7 +214,8 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
                 continue;
             }
 
-            state.Avatars.Add(new NetAvatar {
+            state.Avatars.Add(new NetAvatar
+            {
                 AvatarId = source.AvatarId,
                 Guid = source.Guid,
                 Level = source.Level,
@@ -260,7 +266,8 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
                     $"Team {teamId} was adjusted to match the mapped avatar roster."));
             }
 
-            var target = new NetAvatarTeam {
+            var target = new NetAvatarTeam
+            {
                 TeamId = teamId,
                 Name = name,
                 CurrentAvatarGuid = currentAvatarGuid
@@ -319,7 +326,8 @@ public sealed class StarlightSnapshotMapper(GameData gameData)
         }
     }
 
-    private static NetAvatarTeam CreateEmptyTeam(uint teamId) => new() {
+    private static NetAvatarTeam CreateEmptyTeam(uint teamId) => new()
+    {
         TeamId = teamId,
         Name = $"Team {teamId}"
     };

@@ -5,6 +5,7 @@ public enum OfficialConnectivityError
     GlobalDispatchUnavailable,
     RegionNotFound,
     RegionResponseInvalid,
+    RegionalDispatchRejected,
     RegionCryptoUnsupported,
     RegionCryptoKeyMismatch,
     RegionSignatureMismatch,
@@ -22,6 +23,11 @@ public enum OfficialConnectivityError
     SessionRekeyFailed,
     ComboConfigurationMissing,
     ComboExchangeRejected,
+    SdkAuthenticationRejected,
+    SdkNetworkRisk,
+    SdkUserActionRequired,
+    SdkFingerprintUnavailable,
+    UnsupportedDeviceFingerprintField,
 }
 
 public sealed class OfficialConnectivityException : Exception
@@ -29,15 +35,18 @@ public sealed class OfficialConnectivityException : Exception
     public OfficialConnectivityException(
         OfficialConnectivityError error,
         string message,
-        Exception? innerException = null)
+        Exception? innerException = null,
+        int? retcode = null)
         : base(message)
     {
         Error = error;
         CauseType = innerException?.GetType().Name;
+        Retcode = retcode;
     }
 
     public OfficialConnectivityError Error { get; }
     public string? CauseType { get; }
+    public int? Retcode { get; }
 }
 
 public static class OfficialConnectivityDiagnostic
@@ -65,6 +74,7 @@ public static class OfficialConnectivityDiagnostic
         OfficialConnectivityError.GlobalDispatchUnavailable => "The global dispatch request failed.",
         OfficialConnectivityError.RegionNotFound => "The requested official region was not found.",
         OfficialConnectivityError.RegionResponseInvalid => "The regional dispatch response was invalid.",
+        OfficialConnectivityError.RegionalDispatchRejected => "The regional dispatch request was rejected.",
         OfficialConnectivityError.RegionCryptoUnsupported => "The regional dispatch crypto contract is unsupported.",
         OfficialConnectivityError.RegionCryptoKeyMismatch => "The regional dispatch key did not match.",
         OfficialConnectivityError.RegionSignatureMismatch => "The regional dispatch signature did not match.",
@@ -82,6 +92,11 @@ public static class OfficialConnectivityDiagnostic
         OfficialConnectivityError.SessionRekeyFailed => "The Gate session rekey failed.",
         OfficialConnectivityError.ComboConfigurationMissing => "The Combo configuration is incomplete.",
         OfficialConnectivityError.ComboExchangeRejected => "The Combo exchange failed.",
+        OfficialConnectivityError.SdkAuthenticationRejected => "The official SDK authentication failed.",
+        OfficialConnectivityError.SdkNetworkRisk => "The official SDK requires its network-risk workflow.",
+        OfficialConnectivityError.SdkUserActionRequired => "The official SDK requires user action.",
+        OfficialConnectivityError.SdkFingerprintUnavailable => "The SDK device fingerprint could not be refreshed.",
+        OfficialConnectivityError.UnsupportedDeviceFingerprintField => "The SDK requested an unsupported device fingerprint field.",
         _ => "The official connectivity operation failed.",
     };
 }

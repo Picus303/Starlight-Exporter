@@ -67,6 +67,7 @@ public sealed class OfficialReplayPipelineTests
         weapon.AffixMap[11101] = 2;
         var store = new PlayerStoreNotify
         {
+            StoreType = (StoreType)1,
             ItemList = {
                 new Item { ItemId = 1001, Guid = 100, Material = new Material { Count = 5 } },
                 new Item {

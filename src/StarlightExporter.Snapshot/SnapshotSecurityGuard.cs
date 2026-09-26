@@ -18,7 +18,8 @@ public static class SnapshotSecurityGuard
 
     public static void EnsureNoSensitiveProperties(ReadOnlySpan<byte> utf8Json)
     {
-        var reader = new Utf8JsonReader(utf8Json, new JsonReaderOptions {
+        var reader = new Utf8JsonReader(utf8Json, new JsonReaderOptions
+        {
             CommentHandling = JsonCommentHandling.Disallow
         });
 

@@ -34,7 +34,8 @@ public static class PrivateAccountValidator
             return Invalid("ACCOUNT_DATABASE_NOT_FOUND", $"Account database not found: '{fullPath}'.");
         }
 
-        var connectionString = new SqliteConnectionStringBuilder {
+        var connectionString = new SqliteConnectionStringBuilder
+        {
             DataSource = fullPath,
             Mode = SqliteOpenMode.ReadOnly,
             Pooling = false

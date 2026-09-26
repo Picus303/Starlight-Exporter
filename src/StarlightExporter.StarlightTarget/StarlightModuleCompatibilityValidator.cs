@@ -61,7 +61,8 @@ public static class StarlightModuleCompatibilityValidator
             registry.Build();
 
             using var tunnel = new RecordingTunnel();
-            var player = new StarlightPlayer(services, registry, tunnel) {
+            var player = new StarlightPlayer(services, registry, tunnel)
+            {
                 Uid = playerUid,
                 State = workingState,
                 Profile = workingProfile

@@ -1,5 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <ProjectReference Include="../../src/StarlightExporter.Probe/StarlightExporter.Probe.csproj" />
     <ProjectReference Include="../../src/StarlightExporter.Official/StarlightExporter.Official.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="../../task/Starlight_Exporter_Implementation_Handoff_v2/reference/delivery_4_compact/fixtures/**/*">
+      <Link>D4Fixtures/%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 </Project>

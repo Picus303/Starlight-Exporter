@@ -14,6 +14,9 @@ public sealed record OfficialComboOptions
     public required uint ChannelId { get; init; }
     public uint? ExpectedPlayerUid { get; init; }
     public TimeSpan RequestTimeout { get; init; } = TimeSpan.FromSeconds(15);
+    public OfficialSdkRequestHeaders? Headers { get; init; }
+
+    public override string ToString() => "OfficialComboOptions { Device = [REDACTED] }";
 }
 
 public sealed class OfficialComboSessionExchange : IComboSessionExchange, IDisposable
@@ -64,23 +67,31 @@ public sealed class OfficialComboSessionExchange : IComboSessionExchange, IDispo
         string data = JsonSerializer.Serialize(new ComboRequestData(
             sdkSession.AccountUid,
             sdkSession.IsGuest,
-            sdkSession.Token.Reveal()), JsonOptions);
+            sdkSession.IsGuest ? null : sdkSession.Token.Reveal()), JsonOptions);
         string canonical = string.Create(
             System.Globalization.CultureInfo.InvariantCulture,
             $"app_id={_options.ApplicationId}&channel_id={_options.ChannelId}&data={data}&device={_options.DeviceId}");
         string signature = CreateSignature(canonical);
         string body = JsonSerializer.Serialize(new ComboRequest(
-            _options.ApplicationId,
-            _options.ChannelId,
+            _options.ApplicationId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            _options.ChannelId.ToString(System.Globalization.CultureInfo.InvariantCulture),
             data,
             _options.DeviceId,
             signature), JsonOptions);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, _options.Endpoint)
         {
-            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            Content = OfficialRequestContent.Json(body),
         };
-        request.Headers.TryAddWithoutValidation("x-rpc-device_id", _options.DeviceId);
+        OfficialRequestContent.ApplyObservedTransportDefaults(request);
+        if (_options.Headers is { } headers)
+        {
+            headers.Apply(request);
+        }
+        else
+        {
+            request.Headers.TryAddWithoutValidation("x-rpc-device_id", _options.DeviceId);
+        }
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(_options.RequestTimeout);
 
@@ -138,7 +149,10 @@ public sealed class OfficialComboSessionExchange : IComboSessionExchange, IDispo
             }
             if (envelope.Retcode != 0)
             {
-                throw Failure($"The Combo endpoint rejected the session with retcode {envelope.Retcode}.");
+                throw new OfficialConnectivityException(
+                    OfficialConnectivityError.ComboExchangeRejected,
+                    $"The Combo endpoint rejected the session with retcode {envelope.Retcode}.",
+                    retcode: envelope.Retcode);
             }
             if (envelope.Data is null
                 || string.IsNullOrWhiteSpace(envelope.Data.OpenId)
@@ -147,23 +161,12 @@ public sealed class OfficialComboSessionExchange : IComboSessionExchange, IDispo
                 throw Failure("The Combo response does not contain a usable session.");
             }
 
-            ComboResponseData extra;
-            try
-            {
-                extra = JsonSerializer.Deserialize<ComboResponseData>(envelope.Data.Data, JsonOptions)
-                    ?? new ComboResponseData();
-            }
-            catch (JsonException exception)
-            {
-                throw Failure("The Combo response metadata is invalid.", exception);
-            }
-
             return ComboSession.Create(
                 envelope.Data.OpenId,
                 envelope.Data.ComboToken,
                 envelope.Data.AccountType,
-                extra.Guest,
-                extra.CountryCode,
+                envelope.Data.Guest,
+                envelope.Data.Country,
                 _options.ExpectedPlayerUid);
         }
     }
@@ -203,6 +206,8 @@ public sealed class OfficialComboSessionExchange : IComboSessionExchange, IDispo
             || options.DeviceId.Length > 256
             || options.ApplicationId == 0
             || options.ChannelId == 0
+            || (options.Headers is not null
+                && !string.Equals(options.DeviceId, options.Headers.DeviceId, StringComparison.Ordinal))
             || options.ExpectedPlayerUid == 0
             || options.RequestTimeout <= TimeSpan.Zero
             || options.RequestTimeout > TimeSpan.FromMinutes(2))
@@ -217,16 +222,17 @@ public sealed class OfficialComboSessionExchange : IComboSessionExchange, IDispo
         new(OfficialConnectivityError.ComboExchangeRejected, message, innerException);
 
     private sealed record ComboRequest(
-        [property: JsonPropertyName("app_id")] uint AppId,
-        [property: JsonPropertyName("channel_id")] uint ChannelId,
+        [property: JsonPropertyName("app_id")] string AppId,
+        [property: JsonPropertyName("channel_id")] string ChannelId,
         [property: JsonPropertyName("data")] string Data,
         [property: JsonPropertyName("device")] string Device,
         [property: JsonPropertyName("sign")] string Sign);
 
     private sealed record ComboRequestData(
-        [property: JsonPropertyName("uid")] string Uid,
+        [property: JsonPropertyName("open_id")] string OpenId,
         [property: JsonPropertyName("guest")] bool Guest,
-        [property: JsonPropertyName("token")] string Token);
+        [property: JsonPropertyName("combo_token")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ComboToken);
 
     private sealed record ComboResponseEnvelope
     {
@@ -245,19 +251,13 @@ public sealed class OfficialComboSessionExchange : IComboSessionExchange, IDispo
         [JsonPropertyName("combo_token")]
         public string ComboToken { get; init; } = string.Empty;
 
-        [JsonPropertyName("data")]
-        public string Data { get; init; } = "{}";
-
         [JsonPropertyName("account_type")]
-        public uint AccountType { get; init; } = 1;
-    }
+        public uint AccountType { get; init; }
 
-    private sealed record ComboResponseData
-    {
         [JsonPropertyName("guest")]
         public bool Guest { get; init; }
 
-        [JsonPropertyName("country_code")]
-        public string CountryCode { get; init; } = string.Empty;
+        [JsonPropertyName("country")]
+        public string Country { get; init; } = string.Empty;
     }
 }

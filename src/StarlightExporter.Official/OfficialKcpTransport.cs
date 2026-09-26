@@ -45,7 +45,8 @@ public sealed class OfficialKcpTransport : IAsyncDisposable
         _options = options;
         _timeProvider = timeProvider;
         _lastReceiveTimestamp = timeProvider.GetTimestamp();
-        _messages = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(options.MaximumQueuedMessages) {
+        _messages = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(options.MaximumQueuedMessages)
+        {
             SingleReader = true,
             SingleWriter = true,
             FullMode = BoundedChannelFullMode.Wait,

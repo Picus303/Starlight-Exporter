@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using Starlight.Protobuf.Core;
 using Starlight.Protocol;
 
 namespace StarlightExporter.Official;
@@ -10,17 +11,18 @@ public sealed record OfficialGateSessionOptions
     public TimeSpan PlayerTokenTimeout { get; init; } = TimeSpan.FromSeconds(10);
     public TimeSpan PlayerLoginTimeout { get; init; } = TimeSpan.FromSeconds(30);
     public TimeSpan SynchronizationTimeout { get; init; } = TimeSpan.FromSeconds(30);
-    public TimeSpan SynchronizationQuiescence { get; init; } = TimeSpan.FromSeconds(2);
     public int MaximumMessages { get; init; } = 4096;
     public GateMetadataTrace? MetadataTrace { get; init; }
 }
 
-public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDisposable
+public sealed class LiveGateMessageSource : IOfficialConnectedMessageSource
 {
     private readonly OfficialKcpTransport _transport;
     private readonly OfficialGateCipherState _cipher;
     private readonly OfficialGatePacketCodec _codec;
     private readonly OfficialGateSessionOptions _options;
+    private readonly OfficialGatePacketSequencer _outgoingPackets;
+    private readonly OfficialPostLoginRequestPlanner _postLoginRequests;
     private readonly Queue<OfficialMessageEnvelope> _pending;
     private long _sequence;
     private readonly long _traceStarted;
@@ -32,6 +34,8 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
         OfficialGateCipherState cipher,
         OfficialGatePacketCodec codec,
         OfficialGateSessionOptions options,
+        OfficialGatePacketSequencer outgoingPackets,
+        OfficialPostLoginRequestPlanner postLoginRequests,
         uint playerUid,
         string regionName,
         Queue<OfficialMessageEnvelope> pending,
@@ -42,6 +46,8 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
         _cipher = cipher;
         _codec = codec;
         _options = options;
+        _outgoingPackets = outgoingPackets;
+        _postLoginRequests = postLoginRequests;
         PlayerUid = playerUid;
         RegionName = regionName;
         _pending = pending;
@@ -51,6 +57,8 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
 
     public uint PlayerUid { get; }
     public string RegionName { get; }
+
+    internal PacketHead NextOutgoingMetadata() => _outgoingPackets.Next();
 
     public static async Task<LiveGateMessageSource> ConnectAsync(
         ComboSession session,
@@ -67,6 +75,7 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
         options ??= new OfficialGateSessionOptions();
         ValidateOptions(options);
         long traceStarted = Stopwatch.GetTimestamp();
+        var outgoingPackets = new OfficialGatePacketSequencer();
 
         OfficialKcpTransport? transport = null;
         OfficialGateCipherState? cipher = null;
@@ -83,7 +92,7 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
             using (OfficialPlayerTokenExchange tokenExchange =
                 OfficialPlayerTokenExchange.CreatePinned(session, region, clientProfile))
             {
-                byte[] tokenRequest = tokenExchange.EncodeRequest(codec, cipher);
+                byte[] tokenRequest = tokenExchange.EncodeRequest(codec, cipher, outgoingPackets.Next());
                 AddTrace(
                     options.MetadataTrace,
                     traceStarted,
@@ -117,7 +126,8 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
                 clientProfile,
                 loginProfile,
                 token);
-            byte[] loginRequest = loginExchange.EncodeRequest(codec, cipher);
+            var postLoginRequests = new OfficialPostLoginRequestPlanner(token.PlayerUid);
+            byte[] loginRequest = loginExchange.EncodeRequest(codec, cipher, outgoingPackets.Next());
             AddTrace(
                 options.MetadataTrace,
                 traceStarted,
@@ -160,16 +170,30 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
                 if (packet.Message is PlayerLoginRsp)
                 {
                     loginExchange.CompleteResponse(packet);
+                    await SendObservedRequestsAsync(
+                        postLoginRequests.OnLoginAccepted(packet.PlayerLoginLimitedSocialCache),
+                        transport, codec, cipher, outgoingPackets,
+                        options.MetadataTrace, traceStarted, cancellationToken);
                     return new LiveGateMessageSource(
                         transport,
                         cipher,
                         codec,
                         options,
+                        outgoingPackets,
+                        postLoginRequests,
                         token.PlayerUid,
                         region.RegionName,
                         pending,
                         sequence,
                         traceStarted);
+                }
+
+                if (packet.Message is PlayerDataNotify
+                    && postLoginRequests.OnPlayerData() is { } socialRequest)
+                {
+                    await SendObservedRequestsAsync(
+                        [socialRequest], transport, codec, cipher, outgoingPackets,
+                        options.MetadataTrace, traceStarted, cancellationToken);
                 }
 
                 pending.Enqueue(new OfficialMessageEnvelope(++sequence, packet.Message));
@@ -199,38 +223,29 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
             throw new InvalidOperationException("A live Gate message source can only be consumed once.");
         }
 
-        bool playerData = false;
-        bool playerStore = false;
-        bool avatarData = false;
+        var readiness = new OfficialSnapshotReadiness(loginAccepted: true);
         int count = 0;
         using var synchronizationTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         synchronizationTimeout.CancelAfter(_options.SynchronizationTimeout);
 
         while (_pending.TryDequeue(out OfficialMessageEnvelope? envelope))
         {
-            Observe(envelope.Message, ref playerData, ref playerStore, ref avatarData);
+            readiness.Observe(envelope.Message);
             count++;
             yield return envelope;
         }
 
         while (count < _options.MaximumMessages)
         {
-            bool complete = playerData && playerStore && avatarData;
-            using var nextTimeout = CancellationTokenSource.CreateLinkedTokenSource(
-                synchronizationTimeout.Token);
-            if (complete)
-            {
-                nextTimeout.CancelAfter(_options.SynchronizationQuiescence);
-            }
-
             byte[] encrypted;
             try
             {
-                encrypted = await _transport.ReadAsync(nextTimeout.Token);
+                encrypted = await _transport.ReadAsync(synchronizationTimeout.Token);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                if (complete && !synchronizationTimeout.IsCancellationRequested)
+                readiness.MarkCaptureBoundaryValidated();
+                if (readiness.IsReady)
                 {
                     yield break;
                 }
@@ -248,7 +263,14 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
                 GateTraceDirection.ServerToClient,
                 packet);
             var next = new OfficialMessageEnvelope(++_sequence, packet.Message);
-            Observe(next.Message, ref playerData, ref playerStore, ref avatarData);
+            if (packet.Message is PlayerDataNotify
+                && _postLoginRequests.OnPlayerData() is { } socialRequest)
+            {
+                await SendObservedRequestsAsync(
+                    [socialRequest], _transport, _codec, _cipher, _outgoingPackets,
+                    _options.MetadataTrace, _traceStarted, cancellationToken);
+            }
+            readiness.Observe(next.Message);
             count++;
             yield return next;
         }
@@ -271,7 +293,7 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
     }
 
     public override string ToString() =>
-        $"LiveGateMessageSource {{ PlayerUid = {PlayerUid}, Region = {RegionName}, Secrets = [REDACTED] }}";
+        "LiveGateMessageSource { PlayerUid = [REDACTED], Region = [REDACTED], Secrets = [REDACTED] }";
 
     private static async Task<OfficialGatePacket> ReadPacketAsync(
         OfficialKcpTransport transport,
@@ -295,15 +317,23 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
         }
     }
 
-    private static void Observe(
-        Starlight.Protobuf.Core.IMessage message,
-        ref bool playerData,
-        ref bool playerStore,
-        ref bool avatarData)
+    private static async Task SendObservedRequestsAsync(
+        IReadOnlyList<IMessage> requests,
+        OfficialKcpTransport transport,
+        OfficialGatePacketCodec codec,
+        OfficialGateCipherState cipher,
+        OfficialGatePacketSequencer sequencer,
+        GateMetadataTrace? trace,
+        long started,
+        CancellationToken cancellationToken)
     {
-        playerData |= message is PlayerDataNotify;
-        playerStore |= message is PlayerStoreNotify;
-        avatarData |= message is AvatarDataNotify;
+        foreach (IMessage request in requests)
+        {
+            byte[] encrypted = codec.EncodeEncrypted(request, cipher, sequencer.Next());
+            AddTrace(trace, started, GateTracePhase.InitialSync,
+                GateTraceDirection.ClientToServer, codec.Describe(request));
+            await transport.SendAsync(encrypted, cancellationToken);
+        }
     }
 
     private static void ValidateOptions(OfficialGateSessionOptions options)
@@ -314,8 +344,6 @@ public sealed class LiveGateMessageSource : IOfficialMessageSource, IAsyncDispos
             || options.PlayerLoginTimeout > TimeSpan.FromMinutes(2)
             || options.SynchronizationTimeout <= TimeSpan.Zero
             || options.SynchronizationTimeout > TimeSpan.FromMinutes(5)
-            || options.SynchronizationQuiescence <= TimeSpan.Zero
-            || options.SynchronizationQuiescence > options.SynchronizationTimeout
             || options.MaximumMessages is < 3 or > 16384)
         {
             throw new ArgumentOutOfRangeException(nameof(options), "The Gate session options are invalid.");

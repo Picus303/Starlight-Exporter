@@ -18,3 +18,5 @@ resources.zip
 .env
 .env.*
 !.env.example
+
+task/

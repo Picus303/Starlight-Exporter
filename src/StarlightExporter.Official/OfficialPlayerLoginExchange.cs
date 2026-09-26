@@ -1,30 +1,31 @@
-using System.Buffers.Binary;
 using System.Security.Cryptography;
+using System.Text;
+using Google.Protobuf;
 using Starlight.Protocol;
 
 namespace StarlightExporter.Official;
 
 public sealed record OfficialPlayerLoginProfile
 {
-    public required string PlatformName { get; init; }
     public required string DeviceInfo { get; init; }
     public required string DeviceName { get; init; }
     public required string DeviceUuid { get; init; }
     public required string SystemVersion { get; init; }
-    public required string Checksum { get; init; }
-    public required string ChecksumClientVersion { get; init; }
-    public string ClientVersionHash { get; init; } = string.Empty;
-    public string UserAgent { get; init; } = string.Empty;
-    public uint RegistrationPlatform { get; init; } = 3;
+    public string DeviceFingerprint { get; init; } = string.Empty;
+    public string SecurityLibraryMd5 { get; init; } = string.Empty;
+    public int ScreenWidth { get; init; }
+    public int ScreenHeight { get; init; }
+
+    public override string ToString() => "OfficialPlayerLoginProfile { Device = [REDACTED] }";
 }
 
 public sealed class OfficialPlayerLoginExchange
 {
-    private readonly ComboSession _session;
     private readonly OfficialCurrentRegion _region;
     private readonly OfficialClientProfile _client;
     private readonly OfficialPlayerLoginProfile _login;
     private readonly OfficialPlayerTokenResult _token;
+    private readonly TimeProvider _timeProvider;
     private bool _completed;
 
     public OfficialGatePacketMetadata? RequestMetadata { get; private set; }
@@ -34,7 +35,8 @@ public sealed class OfficialPlayerLoginExchange
         OfficialCurrentRegion region,
         OfficialClientProfile client,
         OfficialPlayerLoginProfile login,
-        OfficialPlayerTokenResult token)
+        OfficialPlayerTokenResult token,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(region);
@@ -43,11 +45,11 @@ public sealed class OfficialPlayerLoginExchange
         ArgumentNullException.ThrowIfNull(token);
         Validate(login);
 
-        _session = session;
         _region = region;
         _client = client;
         _login = login;
         _token = token;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public byte[] EncodeRequest(
@@ -62,39 +64,61 @@ public sealed class OfficialPlayerLoginExchange
         ArgumentNullException.ThrowIfNull(codec);
         ArgumentNullException.ThrowIfNull(cipher);
 
-        Span<byte> random = stackalloc byte[sizeof(ulong)];
-        RandomNumberGenerator.Fill(random);
-        ulong loginRandom = BinaryPrimitives.ReadUInt64BigEndian(random);
-        CryptographicOperations.ZeroMemory(random);
+        string randomKey = _token.ClientVersionRandomKey.Reveal();
+        if (string.IsNullOrEmpty(randomKey))
+        {
+            throw Failure("GetPlayerToken did not provide a client version random key.");
+        }
+        byte[] versionMaterial = Encoding.ASCII.GetBytes(_client.Version + randomKey + "mhy2020");
+        string versionHash;
+        try
+        {
+            // The pinned V70 login contract specifies SHA-1 for this version marker.
+#pragma warning disable CA5350
+            versionHash = Convert.ToBase64String(SHA1.HashData(versionMaterial));
+#pragma warning restore CA5350
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(versionMaterial);
+        }
+        uint timestamp = unchecked((uint)_timeProvider.GetUtcNow().ToUnixTimeMilliseconds());
 
         var request = new PlayerLoginReq
         {
             Token = _token.SessionToken.Reveal(),
-            Checksum = _login.Checksum,
-            UaPc = _login.UserAgent,
-            Platform = _login.PlatformName,
+            Cps = _client.Cps,
+            Checksum = string.Empty,
+            UaPc = _client.Uapc,
+            Platform = string.Empty,
             ClientVersion = _client.Version,
             DeviceInfo = _login.DeviceInfo,
             DeviceName = _login.DeviceName,
-            ClientVersionHash = _login.ClientVersionHash,
+            ClientVersionHash = versionHash,
             DeviceUuid = _login.DeviceUuid,
-            CountryCode = _session.CountryCode,
-            AccountUid = _session.AccountUid,
-            ChecksumClientVersion = _login.ChecksumClientVersion,
+            CountryCode = string.Empty,
+            AccountUid = string.Empty,
+            ChecksumClientVersion = _client.GameVersion,
             SystemVersion = _login.SystemVersion,
-            ChannelId = _client.ChannelId,
+            ChannelId = 0,
             LanguageType = _client.Language,
             SubChannelId = _client.SubChannelId,
-            AccountType = _session.AccountType,
-            TargetUid = _token.PlayerUid,
-            LoginRand = loginRandom,
-            IsGuest = _session.IsGuest,
+            AccountType = _client.ChannelId,
+            TargetUid = 0,
+            LoginRand = 0,
+            IsGuest = false,
             PlatformType = _client.Platform,
             ClientDataVersion = _region.ClientDataVersion,
-            RegPlatform = _login.RegistrationPlatform,
+            RegPlatform = 0,
+            SecurityLibraryMd5 = _login.SecurityLibraryMd5,
+            SecurityCmdReply = ByteString.CopyFrom(_token.SecurityCommandBuffer),
         };
-        RequestMetadata = codec.Describe(request);
-        return codec.EncodeEncrypted(request, cipher, metadata);
+        RequestMetadata = codec.Describe(request, deviceFingerprint: _login.DeviceFingerprint,
+            loginTimestamp: timestamp, screenWidth: _login.ScreenWidth,
+            screenHeight: _login.ScreenHeight);
+        return codec.EncodeEncrypted(request, cipher, metadata,
+            deviceFingerprint: _login.DeviceFingerprint, loginTimestamp: timestamp,
+            screenWidth: _login.ScreenWidth, screenHeight: _login.ScreenHeight);
     }
 
     public void CompleteResponse(OfficialGatePacket packet)
@@ -111,7 +135,10 @@ public sealed class OfficialPlayerLoginExchange
         }
         if (response.Retcode != 0)
         {
-            throw Failure($"The Gate rejected PlayerLogin with retcode {response.Retcode}.");
+            throw new OfficialConnectivityException(
+                OfficialConnectivityError.PlayerLoginRejected,
+                $"The Gate rejected PlayerLogin with retcode {response.Retcode}.",
+                retcode: response.Retcode);
         }
         if ((response.TargetUid != 0 && response.TargetUid != _token.PlayerUid)
             || response.IsDataNeedRelogin)
@@ -123,29 +150,27 @@ public sealed class OfficialPlayerLoginExchange
     }
 
     public override string ToString() =>
-        $"OfficialPlayerLoginExchange {{ PlayerUid = {_token.PlayerUid}, SessionToken = [REDACTED] }}";
+        "OfficialPlayerLoginExchange { PlayerUid = [REDACTED], SessionToken = [REDACTED] }";
 
     private static void Validate(OfficialPlayerLoginProfile profile)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(profile.PlatformName);
         ArgumentException.ThrowIfNullOrWhiteSpace(profile.DeviceInfo);
         ArgumentException.ThrowIfNullOrWhiteSpace(profile.DeviceName);
         ArgumentException.ThrowIfNullOrWhiteSpace(profile.DeviceUuid);
         ArgumentException.ThrowIfNullOrWhiteSpace(profile.SystemVersion);
-        ArgumentException.ThrowIfNullOrWhiteSpace(profile.Checksum);
-        ArgumentException.ThrowIfNullOrWhiteSpace(profile.ChecksumClientVersion);
 
-        if (profile.PlatformName.Length > 64
-            || profile.DeviceInfo.Length > 512
+        if (profile.DeviceInfo.Length > 512
             || profile.DeviceName.Length > 256
             || profile.DeviceUuid.Length > 128
             || profile.SystemVersion.Length > 128
-            || profile.Checksum.Length > 256
-            || profile.ChecksumClientVersion.Length > 256
-            || profile.ClientVersionHash.Length > 256
-            || profile.UserAgent.Length > 1024)
+            || profile.DeviceFingerprint.Length > 32
+            || profile.SecurityLibraryMd5.Length > 32)
         {
             throw new ArgumentException("The PlayerLogin profile contains an oversized field.", nameof(profile));
+        }
+        if (profile.ScreenWidth <= 0 || profile.ScreenHeight <= 0)
+        {
+            throw new ArgumentException("The PlayerLogin display dimensions are invalid.", nameof(profile));
         }
     }
 

@@ -24,6 +24,9 @@ public sealed record GateMetadataTraceRecord
     public required ushort CommandId { get; init; }
     public required string MessageType { get; init; }
     public required int SerializedBodyBytes { get; init; }
+    public required bool Chunked { get; init; }
+    public required bool Duplicate { get; init; }
+    public required string FieldPresenceHash { get; init; }
     public int? Retcode { get; init; }
 }
 
@@ -32,6 +35,7 @@ public sealed class GateMetadataTrace
     public const int MaximumRecords = 4096;
 
     private readonly List<GateMetadataTraceRecord> _records = [];
+    private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
     private long _sequence;
 
     public IReadOnlyList<GateMetadataTraceRecord> Records => _records;
@@ -52,6 +56,9 @@ public sealed class GateMetadataTrace
                 "The Gate metadata trace reached its record limit.");
         }
 
+        string duplicateKey = string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"{direction}:{metadata.CommandId}:{metadata.SerializedBodyBytes}:{metadata.FieldPresenceHash}");
         _records.Add(new GateMetadataTraceRecord
         {
             Sequence = ++_sequence,
@@ -61,6 +68,9 @@ public sealed class GateMetadataTrace
             CommandId = metadata.CommandId,
             MessageType = metadata.MessageType,
             SerializedBodyBytes = metadata.SerializedBodyBytes,
+            Chunked = false,
+            Duplicate = !_seen.Add(duplicateKey),
+            FieldPresenceHash = metadata.FieldPresenceHash,
             Retcode = retcode,
         });
     }
@@ -80,7 +90,8 @@ public sealed class GateMetadataTrace
             new OfficialGatePacketMetadata(
                 packet.CommandId,
                 packet.Message.GetType().Name,
-                packet.BodyLength),
+                packet.BodyLength,
+                packet.FieldPresenceHash),
             retcode);
     }
 }

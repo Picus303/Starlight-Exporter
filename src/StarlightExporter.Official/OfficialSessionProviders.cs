@@ -2,27 +2,36 @@ namespace StarlightExporter.Official;
 
 public sealed class SdkSession
 {
-    private SdkSession(string accountUid, OfficialSecret token, bool isGuest)
+    private SdkSession(string accountUid, OfficialSecret token, bool isGuest, string country)
     {
         AccountUid = accountUid;
         Token = token;
         IsGuest = isGuest;
+        Country = country;
     }
 
     public string AccountUid { get; }
     public bool IsGuest { get; }
+    public string Country { get; }
     internal OfficialSecret Token { get; }
 
-    public static SdkSession Create(string accountUid, string token, bool isGuest = false)
+    public static SdkSession Create(
+        string accountUid,
+        string token,
+        bool isGuest = false,
+        string country = "")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(accountUid);
-        ArgumentException.ThrowIfNullOrWhiteSpace(token);
-        if (accountUid.Length > 64 || token.Length > 4096)
+        if (!isGuest)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(token);
+        }
+        if (accountUid.Length > 64 || token.Length > 4096 || country.Length > 8)
         {
             throw new ArgumentException("The SDK session contains an oversized field.");
         }
 
-        return new SdkSession(accountUid, OfficialSecret.Create(token), isGuest);
+        return new SdkSession(accountUid, OfficialSecret.Create(token), isGuest, country);
     }
 
     public override string ToString() =>

@@ -1,7 +1,7 @@
-using Starlight.Kcp;
-using StarlightExporter.Official;
 using System.Net;
 using System.Net.Sockets;
+using Starlight.Kcp;
+using StarlightExporter.Official;
 using Xunit;
 
 namespace StarlightExporter.OfficialTests;
@@ -18,7 +18,8 @@ public sealed class OfficialKcpTransportTests
 
         await using OfficialKcpTransport transport = await OfficialKcpTransport.ConnectAsync(
             Region(port),
-            new OfficialKcpTransportOptions {
+            new OfficialKcpTransportOptions
+            {
                 HandshakeTimeout = TimeSpan.FromMilliseconds(250),
                 IdleTimeout = TimeSpan.FromSeconds(5),
             },
@@ -42,7 +43,8 @@ public sealed class OfficialKcpTransportTests
         OfficialConnectivityException exception = await Assert.ThrowsAsync<OfficialConnectivityException>(
             async () => await OfficialKcpTransport.ConnectAsync(
                 Region(port),
-                new OfficialKcpTransportOptions {
+                new OfficialKcpTransportOptions
+                {
                     HandshakeTimeout = TimeSpan.FromMilliseconds(20),
                     HandshakeAttempts = 2,
                 }));
@@ -88,7 +90,8 @@ public sealed class OfficialKcpTransportTests
         outbound.Clear();
     }
 
-    private static OfficialCurrentRegion Region(int port) => new() {
+    private static OfficialCurrentRegion Region(int port) => new()
+    {
         RegionName = "loopback",
         GateServerIp = IPAddress.Loopback.ToString(),
         GateServerPort = checked((uint)port),

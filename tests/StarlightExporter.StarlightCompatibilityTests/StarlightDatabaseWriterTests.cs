@@ -258,7 +258,8 @@ public sealed class StarlightDatabaseWriterTests
     private static async Task<NetPlayer> ReadPlayerAsync(string databasePath, uint uid)
     {
         var options = new DbContextOptionsBuilder<StarlightDbContext>()
-            .UseSqlite(new SqliteConnectionStringBuilder {
+            .UseSqlite(new SqliteConnectionStringBuilder
+            {
                 DataSource = databasePath,
                 Pooling = false
             }.ToString())

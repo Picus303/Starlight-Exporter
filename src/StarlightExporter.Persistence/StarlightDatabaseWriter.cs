@@ -65,14 +65,16 @@ public static class StarlightDatabaseWriter
         string temporaryPath,
         CancellationToken cancellationToken)
     {
-        var connectionString = new SqliteConnectionStringBuilder {
+        var connectionString = new SqliteConnectionStringBuilder
+        {
             DataSource = temporaryPath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             Pooling = false
         }.ToString();
 
         HostApplicationBuilder builder = Host.CreateApplicationBuilder();
-        builder.Services.AddStarlightDbContext<StarlightDbContext>(new DbGateConfig {
+        builder.Services.AddStarlightDbContext<StarlightDbContext>(new DbGateConfig
+        {
             Provider = ProviderType.Sqlite,
             ConnectionString = connectionString
         });
@@ -86,10 +88,12 @@ public static class StarlightDatabaseWriter
             StarlightDbContext db = scope.ServiceProvider.GetRequiredService<StarlightDbContext>();
 
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-            db.Players.Add(new Player {
+            db.Players.Add(new Player
+            {
                 Id = request.PlayerUid,
                 AccountId = request.PrivateAccountId,
-                Profile = new PlayerProfile {
+                Profile = new PlayerProfile
+                {
                     Nickname = request.Profile.Nickname,
                     Signature = request.Profile.Signature,
                     PictureId = request.Profile.PictureId,

@@ -28,10 +28,12 @@ internal static class TestStarlightPlayer
         registry.Build();
 
         var tunnel = new RecordingTunnel();
-        var player = new StarlightPlayer(services, registry, tunnel) {
+        var player = new StarlightPlayer(services, registry, tunnel)
+        {
             Uid = 765432100,
             State = state,
-            Profile = profile ?? new NetPlayerProfile {
+            Profile = profile ?? new NetPlayerProfile
+            {
                 Nickname = "Traveler",
                 Signature = "Sanitized fixture",
                 PictureId = 10000005,

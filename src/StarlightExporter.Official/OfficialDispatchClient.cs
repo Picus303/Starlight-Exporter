@@ -67,7 +67,8 @@ public sealed class OfficialDispatchClient : IOfficialDispatchClient
         {
             throw new OfficialConnectivityException(
                 OfficialConnectivityError.ClientVersionRejected,
-                $"Global dispatch rejected the client profile with retcode {response.Retcode}.");
+                $"Global dispatch rejected the client profile with retcode {response.Retcode}.",
+                retcode: response.Retcode);
         }
 
         var regions = new List<OfficialRegion>(response.RegionList.Count);
@@ -106,6 +107,23 @@ public sealed class OfficialDispatchClient : IOfficialDispatchClient
         OfficialClientProfile profile,
         string regionName,
         CancellationToken cancellationToken = default)
+        => await ResolveRegionCoreAsync(profile, regionName, null, cancellationToken);
+
+    public Task<OfficialCurrentRegion> ResolveRegionAsync(
+        OfficialClientProfile profile,
+        string regionName,
+        ComboSession session,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        return ResolveRegionCoreAsync(profile, regionName, session, cancellationToken);
+    }
+
+    private async Task<OfficialCurrentRegion> ResolveRegionCoreAsync(
+        OfficialClientProfile profile,
+        string regionName,
+        ComboSession? session,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
 
@@ -121,14 +139,14 @@ public sealed class OfficialDispatchClient : IOfficialDispatchClient
 
         Uri uri = AppendQuery(
             selected.DispatchUri,
-            profile.DispatchParameters(_timeProvider, regional: true));
+            profile.DispatchParameters(_timeProvider, regional: true, session));
         string content = await GetStringAsync(
             uri,
             OfficialConnectivityError.GlobalDispatchUnavailable,
             cancellationToken);
 
         (byte[] payload, OfficialRegionalPayloadFormat payloadFormat) =
-            DecodeRegionalPayload(content, profile.KeyId);
+            DecodeRegionalPayload(content, profile.KeyId, allowDirectProtobuf: session is null);
         QueryCurrRegionHttpRsp response;
         try
         {
@@ -146,8 +164,9 @@ public sealed class OfficialDispatchClient : IOfficialDispatchClient
         if (response.Retcode != 0)
         {
             throw new OfficialConnectivityException(
-                OfficialConnectivityError.ClientVersionRejected,
-                $"Regional dispatch rejected the client profile with retcode {response.Retcode}.");
+                OfficialConnectivityError.RegionalDispatchRejected,
+                $"Regional dispatch rejected the request with retcode {response.Retcode}.",
+                retcode: response.Retcode);
         }
 
         RegionInfo? region = response.RegionInfo;
@@ -163,9 +182,7 @@ public sealed class OfficialDispatchClient : IOfficialDispatchClient
 
 
         byte[] clientSecretKey = response.ClientSecretKey.ToByteArray();
-        byte[] secretKey = region.SecretKey.ToByteArray();
-        if (!Ec2bKeyGen.HasValidLayout(clientSecretKey)
-            || !Ec2bKeyGen.HasValidLayout(secretKey))
+        if (!Ec2bKeyGen.HasValidLayout(clientSecretKey))
         {
             throw new OfficialConnectivityException(
                 OfficialConnectivityError.RegionResponseInvalid,
@@ -180,7 +197,7 @@ public sealed class OfficialDispatchClient : IOfficialDispatchClient
             UseGateServerDomainName = region.UseGateserverDomainName,
             GateServerDomainName = region.GateserverDomainName,
             ClientSecretKey = clientSecretKey,
-            SecretKey = secretKey,
+            SecretKey = region.SecretKey.ToByteArray(),
             ConnectGateTicket = OfficialSecret.Create(response.ConnectGateTicket),
             ClientDataVersion = region.ClientDataVersion,
             ClientSilenceDataVersion = region.ClientSilenceDataVersion,
@@ -254,10 +271,17 @@ public sealed class OfficialDispatchClient : IOfficialDispatchClient
 
     private (byte[] Payload, OfficialRegionalPayloadFormat Format) DecodeRegionalPayload(
         string content,
-        uint keyId)
+        uint keyId,
+        bool allowDirectProtobuf)
     {
         if (!content.StartsWith('{'))
         {
+            if (!allowDirectProtobuf)
+            {
+                throw new OfficialConnectivityException(
+                    OfficialConnectivityError.RegionResponseInvalid,
+                    "The authenticated regional response is not a JSON crypto envelope.");
+            }
             return (
                 DecodeBase64(
                     content,
@@ -338,16 +362,28 @@ public sealed class OfficialDispatchClient : IOfficialDispatchClient
             parts.Add(builder.Query.TrimStart('?'));
         }
 
-        parts.AddRange(parameters.Select(pair =>
-            $"{Uri.EscapeDataString(pair.Key)}={Uri.EscapeDataString(pair.Value)}"));
+        foreach (KeyValuePair<string, string> pair in parameters)
+        {
+            if (!IsSafeQueryScalar(pair.Key) || !IsSafeQueryScalar(pair.Value))
+            {
+                throw new ArgumentException("Dispatch query values must be prevalidated safe scalars.", nameof(parameters));
+            }
+            parts.Add($"{pair.Key}={pair.Value}");
+        }
         builder.Query = string.Join('&', parts);
         return builder.Uri;
     }
+
+    private static bool IsSafeQueryScalar(string value) =>
+        value.Length is > 0 and <= 256
+        && value.All(character => char.IsAsciiLetterOrDigit(character)
+            || character is '.' or '_' or '-');
 
     private static void ValidateProfile(OfficialClientProfile profile)
     {
         ArgumentNullException.ThrowIfNull(profile);
         if (string.IsNullOrWhiteSpace(profile.Version)
+            || string.IsNullOrWhiteSpace(profile.GameVersion)
             || !string.Equals(profile.ProtocolVersion, "V70", StringComparison.Ordinal)
             || profile.KeyId is 0 or > int.MaxValue
             || profile.ApplicationId == 0)

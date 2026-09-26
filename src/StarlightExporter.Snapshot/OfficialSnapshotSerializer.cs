@@ -96,7 +96,8 @@ public static class OfficialSnapshotSerializer
         }
     }
 
-    private static OfficialSnapshot Canonicalize(OfficialSnapshot snapshot) => snapshot with {
+    private static OfficialSnapshot Canonicalize(OfficialSnapshot snapshot) => snapshot with
+    {
         Materials = [.. snapshot.Materials.OrderBy(item => item.ItemId).ThenBy(item => item.Guid)],
         Weapons = [.. snapshot.Weapons.OrderBy(item => item.Guid).ThenBy(item => item.ItemId)],
         Avatars = [.. snapshot.Avatars.OrderBy(item => item.Guid).ThenBy(item => item.AvatarId)],

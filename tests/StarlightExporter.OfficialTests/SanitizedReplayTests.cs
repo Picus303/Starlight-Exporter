@@ -80,6 +80,52 @@ public sealed class SanitizedReplayTests
     }
 
     [Fact]
+    public async Task MatchingSocialDetailConfirmsAbsentPictureWithoutMarkingProfileUnknown()
+    {
+        OfficialMessageEnvelope[] messages =
+        [
+            .. CompleteMessages(),
+            new OfficialMessageEnvelope(4, new GetPlayerSocialDetailRsp
+            {
+                DetailData = new SocialDetail
+                {
+                    Uid = 123456789,
+                    Signature = "synthetic-signature",
+                    NameCardId = 210001,
+                },
+            }),
+        ];
+
+        OfficialSnapshot snapshot = await new OfficialSnapshotCollector().CollectAsync(
+            Context(withProfile: false), new InMemoryMessageSource(messages));
+
+        Assert.Equal("synthetic-signature", snapshot.Player.Signature);
+        Assert.Equal(0u, snapshot.Player.PictureId);
+        Assert.Equal(210001u, snapshot.Player.NameCardId);
+        Assert.DoesNotContain(snapshot.Unsupported, record => record.Category == "profile");
+    }
+
+    [Fact]
+    public async Task SignatureNotificationResolvesOnlyThatFieldWhenDetailIsMissing()
+    {
+        OfficialMessageEnvelope[] messages =
+        [
+            .. CompleteMessages(),
+            new OfficialMessageEnvelope(4, new PlayerSignatureNotify
+            {
+                Signature = "synthetic-notification",
+            }),
+        ];
+
+        OfficialSnapshot snapshot = await new OfficialSnapshotCollector().CollectAsync(
+            Context(withProfile: false), new InMemoryMessageSource(messages));
+
+        Assert.Equal("synthetic-notification", snapshot.Player.Signature);
+        Assert.Equal(2, snapshot.Unsupported.Count(record => record.Category == "profile"));
+        Assert.DoesNotContain(snapshot.Unsupported, record => record.Identifier == "signature");
+    }
+
+    [Fact]
     public async Task ReplayWriterRejectsAuthenticationMessages()
     {
         using var directory = new TemporaryDirectory();
@@ -154,12 +200,16 @@ public sealed class SanitizedReplayTests
     public async Task CollectorCombinesStoreFragmentsIdempotently()
     {
         OfficialMessageEnvelope[] complete = CompleteMessages();
-        var firstStore = new PlayerStoreNotify {
+        var firstStore = new PlayerStoreNotify
+        {
+            StoreType = (StoreType)1,
             ItemList = {
                 new Item { ItemId = 1001, Guid = 100, Material = new Material { Count = 1 } },
             },
         };
-        var secondStore = new PlayerStoreNotify {
+        var secondStore = new PlayerStoreNotify
+        {
+            StoreType = (StoreType)1,
             ItemList = {
                 new Item { ItemId = 1001, Guid = 100, Material = new Material { Count = 5 } },
                 CreateWeapon(),
@@ -219,13 +269,16 @@ public sealed class SanitizedReplayTests
     private static OfficialMessageEnvelope[] CompleteMessages()
     {
         var player = new PlayerDataNotify { NickName = "Traveler" };
-        var store = new PlayerStoreNotify {
+        var store = new PlayerStoreNotify
+        {
+            StoreType = (StoreType)1,
             ItemList = {
                 new Item { ItemId = 1001, Guid = 100, Material = new Material { Count = 5 } },
                 CreateWeapon(),
             },
         };
-        var avatar = new AvatarInfo {
+        var avatar = new AvatarInfo
+        {
             AvatarId = 10000005,
             Guid = 300,
             BornTime = 1_700_000_000,
@@ -235,7 +288,8 @@ public sealed class SanitizedReplayTests
                 [(uint)PlayerProperty.Level] = PlayerProperty.Level.Value(50),
             },
         };
-        var avatars = new AvatarDataNotify {
+        var avatars = new AvatarDataNotify
+        {
             CurAvatarTeamId = 1,
             ChooseAvatarGuid = 300,
             AvatarList = { avatar },
@@ -255,7 +309,8 @@ public sealed class SanitizedReplayTests
     {
         var weapon = new Weapon { Level = 20, PromoteLevel = 0 };
         weapon.AffixMap[101] = 2;
-        return new Item {
+        return new Item
+        {
             ItemId = 11101,
             Guid = 200,
             Equip = new Equip { Weapon = weapon },

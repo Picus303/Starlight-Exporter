@@ -96,7 +96,8 @@ public static class ImportReportWriter
 
     private static JsonSerializerOptions CreateOptions()
     {
-        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web) {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
             WriteIndented = true
         };
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));

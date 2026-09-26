@@ -1,7 +1,7 @@
 using Starlight.Game.Resources;
 using Starlight.Game.Resources.Excel;
-using StarlightExporter.StarlightTarget;
 using StarlightExporter.Snapshot;
+using StarlightExporter.StarlightTarget;
 using Xunit;
 
 namespace StarlightExporter.Tests;
@@ -17,7 +17,8 @@ public sealed class StarlightSnapshotMapperEdgeTests
         data.MaterialData[1002] = new MaterialData { Id = 1002, StackLimit = 0 };
         data.WeaponData[11101].GadgetId = 42;
         data.WeaponData[11101].SkillAffix = [43, 44];
-        OfficialSnapshot snapshot = source with {
+        OfficialSnapshot snapshot = source with
+        {
             Materials = [source.Materials[0], new SnapshotMaterial(1002, 10002, 10)]
         };
 
@@ -37,7 +38,8 @@ public sealed class StarlightSnapshotMapperEdgeTests
     public async Task MissingWeaponResourceMakesEquippedAvatarUnmappable()
     {
         OfficialSnapshot source = await ReadMinimalAsync();
-        OfficialSnapshot snapshot = source with {
+        OfficialSnapshot snapshot = source with
+        {
             Weapons = [source.Weapons[0] with { ItemId = 99999 }]
         };
         GameData data = TestGameData.Create();
@@ -85,7 +87,8 @@ public sealed class StarlightSnapshotMapperEdgeTests
         OfficialSnapshot source = await ReadMinimalAsync();
         const uint unsupportedAvatarId = 10000006;
         const ulong unsupportedAvatarGuid = 30002;
-        OfficialSnapshot snapshot = source with {
+        OfficialSnapshot snapshot = source with
+        {
             Avatars = [
                 source.Avatars[0],
                 new SnapshotAvatar(unsupportedAvatarId, unsupportedAvatarGuid, 20, 0, 1, 20001)
@@ -120,7 +123,8 @@ public sealed class StarlightSnapshotMapperEdgeTests
             weapons.Add(new SnapshotWeapon(11101, 200000 + index, 1, 1, 0, 11101, 50011101));
         }
 
-        OfficialSnapshot snapshot = source with {
+        OfficialSnapshot snapshot = source with
+        {
             Materials = materials,
             Weapons = weapons,
             Avatars = [source.Avatars[0] with { WeaponGuid = 200000 }]
@@ -150,7 +154,8 @@ public sealed class StarlightSnapshotMapperEdgeTests
         bool expectsRepair)
     {
         OfficialSnapshot source = await ReadMinimalAsync();
-        OfficialSnapshot snapshot = source with {
+        OfficialSnapshot snapshot = source with
+        {
             Weapons = [source.Weapons[0] with { Level = level, PromoteLevel = sourcePromotion }]
         };
 

@@ -524,7 +524,8 @@ public sealed class CliApplicationTests
     {
         var weapon = new Weapon { Level = 20, PromoteLevel = 0 };
         weapon.AffixMap[101] = 2;
-        var avatar = new AvatarInfo {
+        var avatar = new AvatarInfo
+        {
             AvatarId = 10000005,
             Guid = 300,
             BornTime = 1_700_000_000,
@@ -537,6 +538,7 @@ public sealed class CliApplicationTests
         OfficialMessageEnvelope[] messages = [
             new(1, new PlayerDataNotify { NickName = "Traveler" }),
             new(2, new PlayerStoreNotify {
+                StoreType = (StoreType)1,
                 ItemList = {
                     new Item { ItemId = 1001, Guid = 100, Material = new Material { Count = 5 } },
                     new Item {

@@ -37,8 +37,10 @@ public sealed class OfficialKcpPeer
             conversationId,
             token,
             stream: false,
-            new DelegateWriter(output)) {
-            KcpVersion = wireVersion switch {
+            new DelegateWriter(output))
+        {
+            KcpVersion = wireVersion switch
+            {
                 OfficialKcpWireVersion.Base => KcpVersion.KCP_BASE,
                 OfficialKcpWireVersion.HoyoV1 => KcpVersion.KCP_HYV_V1,
                 _ => throw new ArgumentOutOfRangeException(nameof(wireVersion))

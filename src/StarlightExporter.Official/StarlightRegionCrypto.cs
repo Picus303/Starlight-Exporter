@@ -7,32 +7,24 @@ namespace StarlightExporter.Official;
 public sealed class StarlightRegionCrypto : IOfficialRegionCrypto, IDisposable
 {
     private readonly ClientCrypto _crypto;
-    private readonly RSA? _externalVerificationKey;
+    private readonly RSA _gatePublicKey;
     private bool _disposed;
 
-    private StarlightRegionCrypto(ClientCrypto crypto, RSA? externalVerificationKey = null)
+    private StarlightRegionCrypto(ClientCrypto crypto, RSA gatePublicKey)
     {
         _crypto = crypto;
-        _externalVerificationKey = externalVerificationKey;
+        _gatePublicKey = gatePublicKey;
     }
 
     public static StarlightRegionCrypto CreatePinned() =>
-        new(ClientCrypto.Create(generateRsaKeys: false));
+        CreatePinnedWithVerificationKey(OfficialRsaKeyProfile.OsGlobalV70GatePublicKeyPem);
 
     public static StarlightRegionCrypto CreatePinnedWithVerificationKey(string publicKeyPem)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(publicKeyPem);
-        RSA verificationKey = RSA.Create();
+        RSA verificationKey = OfficialRsaKeyProfile.ImportGatePublicKey(publicKeyPem);
         try
         {
-            verificationKey.ImportFromPem(publicKeyPem);
-            if (verificationKey.KeySize < 2048)
-            {
-                throw new ArgumentException(
-                    "The regional verification key must be at least 2048 bits.",
-                    nameof(publicKeyPem));
-            }
-
             return new StarlightRegionCrypto(
                 ClientCrypto.Create(generateRsaKeys: false),
                 verificationKey);
@@ -79,8 +71,8 @@ public sealed class StarlightRegionCrypto : IOfficialRegionCrypto, IDisposable
                 exception);
         }
 
-        RSA? signingKey = _externalVerificationKey ?? _crypto.SigningKey;
-        if (signingKey is null || signature.Length != signingKey.KeySize / 8)
+        RSA signingKey = _gatePublicKey;
+        if (signature.Length != signingKey.KeySize / 8)
         {
             throw Failure(
                 OfficialConnectivityError.RegionSignatureMismatch,
@@ -165,7 +157,7 @@ public sealed class StarlightRegionCrypto : IOfficialRegionCrypto, IDisposable
         }
 
         _crypto.Dispose();
-        _externalVerificationKey?.Dispose();
+        _gatePublicKey.Dispose();
         _disposed = true;
     }
 

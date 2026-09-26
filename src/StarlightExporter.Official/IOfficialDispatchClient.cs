@@ -10,6 +10,12 @@ public interface IOfficialDispatchClient
         OfficialClientProfile profile,
         string regionName,
         CancellationToken cancellationToken = default);
+
+    Task<OfficialCurrentRegion> ResolveRegionAsync(
+        OfficialClientProfile profile,
+        string regionName,
+        ComboSession session,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IOfficialRegionCrypto

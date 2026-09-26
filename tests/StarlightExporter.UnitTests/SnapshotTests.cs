@@ -41,7 +41,8 @@ public sealed class SnapshotTests
     public async Task AvatarBornTimeMustFitInUInt32(long bornTime)
     {
         OfficialSnapshot source = await OfficialSnapshotSerializer.ReadAsync(FixturePath("minimal-valid.json"));
-        OfficialSnapshot snapshot = source with {
+        OfficialSnapshot snapshot = source with
+        {
             Avatars = [source.Avatars[0] with { BornTime = bornTime }]
         };
 
@@ -61,11 +62,13 @@ public sealed class SnapshotTests
             var addedMaterial = new SnapshotMaterial(ItemId: 2002, Guid: 20002, Count: 2);
             var firstUnsupported = new UnsupportedRecord("quest", "2", "Not persisted.");
             var secondUnsupported = new UnsupportedRecord("achievement", "1", "Not persisted.");
-            OfficialSnapshot first = source with {
+            OfficialSnapshot first = source with
+            {
                 Materials = [addedMaterial, .. source.Materials],
                 Unsupported = [firstUnsupported, secondUnsupported]
             };
-            OfficialSnapshot second = source with {
+            OfficialSnapshot second = source with
+            {
                 Materials = [.. source.Materials, addedMaterial],
                 Unsupported = [secondUnsupported, firstUnsupported]
             };
@@ -184,7 +187,8 @@ public sealed class SnapshotTests
     public async Task SnapshotEntityLimitsAreValidated()
     {
         OfficialSnapshot source = await OfficialSnapshotSerializer.ReadAsync(FixturePath("minimal-valid.json"));
-        OfficialSnapshot oversized = source with {
+        OfficialSnapshot oversized = source with
+        {
             Materials = [.. Enumerable.Range(1, SnapshotContract.MaximumMaterials + 1)
                 .Select(index => new SnapshotMaterial((uint)index, (ulong)index, 1))]
         };

@@ -7,22 +7,31 @@ namespace StarlightExporter.Official;
 
 public sealed class OfficialPlayerTokenResult
 {
-    internal OfficialPlayerTokenResult(uint playerUid, string sessionToken)
+    internal OfficialPlayerTokenResult(
+        uint playerUid,
+        string sessionToken,
+        string clientVersionRandomKey,
+        byte[] securityCommandBuffer)
     {
         PlayerUid = playerUid;
         SessionToken = OfficialSecret.Create(sessionToken);
+        ClientVersionRandomKey = OfficialSecret.Create(clientVersionRandomKey);
+        SecurityCommandBuffer = securityCommandBuffer;
     }
 
     public uint PlayerUid { get; }
     internal OfficialSecret SessionToken { get; }
+    internal OfficialSecret ClientVersionRandomKey { get; }
+    internal byte[] SecurityCommandBuffer { get; }
 
     public override string ToString() =>
-        $"OfficialPlayerTokenResult {{ PlayerUid = {PlayerUid}, SessionToken = [REDACTED] }}";
+        "OfficialPlayerTokenResult { PlayerUid = [REDACTED], Secrets = [REDACTED] }";
 }
 
 public sealed class OfficialPlayerTokenExchange : IDisposable
 {
     private readonly ClientCrypto _crypto;
+    private readonly RSA _gatePublicKey;
     private readonly ComboSession _session;
     private readonly OfficialCurrentRegion _region;
     private readonly OfficialClientProfile _profile;
@@ -34,12 +43,14 @@ public sealed class OfficialPlayerTokenExchange : IDisposable
 
     private OfficialPlayerTokenExchange(
         ClientCrypto crypto,
+        RSA gatePublicKey,
         ComboSession session,
         OfficialCurrentRegion region,
         OfficialClientProfile profile,
         ulong clientSeed)
     {
         _crypto = crypto;
+        _gatePublicKey = gatePublicKey;
         _session = session;
         _region = region;
         _profile = profile;
@@ -62,12 +73,38 @@ public sealed class OfficialPlayerTokenExchange : IDisposable
         RandomNumberGenerator.Fill(seed);
         ulong clientSeed = BinaryPrimitives.ReadUInt64BigEndian(seed);
         CryptographicOperations.ZeroMemory(seed);
-        return new OfficialPlayerTokenExchange(
-            ClientCrypto.Create(generateRsaKeys: false),
-            session,
-            region,
-            profile,
-            clientSeed);
+        return CreatePinned(session, region, profile, clientSeed);
+    }
+
+    internal static OfficialPlayerTokenExchange CreatePinned(
+        ComboSession session,
+        OfficialCurrentRegion region,
+        OfficialClientProfile profile,
+        ulong clientSeed)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(region);
+        ArgumentNullException.ThrowIfNull(profile);
+        if (profile.KeyId is 0 or > int.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(profile), "The client key ID is invalid.");
+        }
+        RSA gatePublicKey = OfficialRsaKeyProfile.ImportGatePublicKey(profile.GateServerPublicKeyPem);
+        try
+        {
+            return new OfficialPlayerTokenExchange(
+                ClientCrypto.Create(generateRsaKeys: false),
+                gatePublicKey,
+                session,
+                region,
+                profile,
+                clientSeed);
+        }
+        catch
+        {
+            gatePublicKey.Dispose();
+            throw;
+        }
     }
 
     public byte[] EncodeRequest(
@@ -83,18 +120,12 @@ public sealed class OfficialPlayerTokenExchange : IDisposable
         ArgumentNullException.ThrowIfNull(codec);
         ArgumentNullException.ThrowIfNull(cipher);
 
-        RSA? signingKey = _crypto.SigningKey;
-        if (signingKey is null)
-        {
-            throw CryptoFailure("The pinned client random-key RSA key is unavailable.");
-        }
-
         Span<byte> seed = stackalloc byte[sizeof(ulong)];
         BinaryPrimitives.WriteUInt64BigEndian(seed, _clientSeed);
         byte[] encryptedSeed;
         try
         {
-            encryptedSeed = signingKey.Encrypt(seed, RSAEncryptionPadding.Pkcs1);
+            encryptedSeed = _gatePublicKey.Encrypt(seed, RSAEncryptionPadding.Pkcs1);
         }
         catch (CryptographicException exception)
         {
@@ -115,16 +146,16 @@ public sealed class OfficialPlayerTokenExchange : IDisposable
                 AccountToken = _session.AccountToken.Reveal(),
                 Lang = _profile.Language,
                 AccountType = _session.AccountType,
-                Uid = _session.ExpectedUid ?? 0,
+                Uid = 0,
                 PlatformType = _profile.Platform,
                 KeyId = _profile.KeyId,
                 IsGuest = _session.IsGuest,
                 ChannelId = _profile.ChannelId,
                 SubChannelId = _profile.SubChannelId,
-                CountryCode = _session.CountryCode,
+                CountryCode = string.Empty,
             };
-            RequestMetadata = codec.Describe(request);
-            return codec.EncodeEncrypted(request, cipher, metadata);
+            RequestMetadata = codec.Describe(request, _profile.Version);
+            return codec.EncodeEncrypted(request, cipher, metadata, _profile.Version);
         }
         finally
         {
@@ -154,7 +185,8 @@ public sealed class OfficialPlayerTokenExchange : IDisposable
         {
             throw new OfficialConnectivityException(
                 OfficialConnectivityError.PlayerTokenRejected,
-                $"The Gate rejected GetPlayerToken with retcode {response.Retcode}.");
+                $"The Gate rejected GetPlayerToken with retcode {response.Retcode}.",
+                retcode: response.Retcode);
         }
         if (response.Uid == 0
             || response.KeyId != _profile.KeyId
@@ -185,10 +217,8 @@ public sealed class OfficialPlayerTokenExchange : IDisposable
                 throw CryptoFailure("The server random key cannot be decrypted.");
             }
 
-            RSA? signingKey = _crypto.SigningKey;
-            if (signingKey is null
-                || signature.Length != signingKey.KeySize / 8
-                || !signingKey.VerifyData(
+            if (signature.Length != _gatePublicKey.KeySize / 8
+                || !_gatePublicKey.VerifyData(
                     combinedSeed,
                     signature,
                     HashAlgorithmName.SHA256,
@@ -203,7 +233,11 @@ public sealed class OfficialPlayerTokenExchange : IDisposable
             cipher.ActivateSessionPadAfterTokenResponse(sessionPad);
             _clientSeed = 0;
             _completed = true;
-            return new OfficialPlayerTokenResult(response.Uid, response.Token);
+            return new OfficialPlayerTokenResult(
+                response.Uid,
+                response.Token,
+                response.ClientVersionRandomKey,
+                response.SecurityCmdBuffer.ToByteArray());
         }
         finally
         {
@@ -222,6 +256,7 @@ public sealed class OfficialPlayerTokenExchange : IDisposable
         }
 
         _clientSeed = 0;
+        _gatePublicKey.Dispose();
         _crypto.Dispose();
         _disposed = true;
     }

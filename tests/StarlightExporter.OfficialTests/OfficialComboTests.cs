@@ -17,7 +17,7 @@ public sealed class OfficialComboTests
         {
             Content = new StringContent(
                 """
-                {"retcode":0,"message":"OK","data":{"combo_id":"0","open_id":"account-open-id","combo_token":"combo-secret","data":"{\"guest\":false,\"country_code\":\"FR\",\"is_new_register\":false}","heartbeat":false,"account_type":1,"fatigue_remind":null}}
+                {"retcode":0,"message":"OK","data":{"combo_id":"0","open_id":"account-open-id","combo_token":"combo-secret","guest":false,"country":"FR","heartbeat":false,"account_type":1,"fatigue_remind":null}}
                 """,
                 Encoding.UTF8,
                 "application/json"),
@@ -30,8 +30,12 @@ public sealed class OfficialComboTests
 
         using JsonDocument request = JsonDocument.Parse(Assert.Single(handler.Bodies));
         JsonElement root = request.RootElement;
+        Assert.Equal(JsonValueKind.String, root.GetProperty("app_id").ValueKind);
+        Assert.Equal("4", root.GetProperty("app_id").GetString());
+        Assert.Equal(JsonValueKind.String, root.GetProperty("channel_id").ValueKind);
+        Assert.Equal("1", root.GetProperty("channel_id").GetString());
         string data = root.GetProperty("data").GetString()!;
-        Assert.Equal("{\"uid\":\"sdk-uid\",\"guest\":false,\"token\":\"sdk-secret\"}", data);
+        Assert.Equal("{\"open_id\":\"sdk-uid\",\"guest\":false,\"combo_token\":\"sdk-secret\"}", data);
         string canonical = $"app_id=4&channel_id=1&data={data}&device=synthetic-device";
         string expectedSignature = Convert.ToHexStringLower(HMACSHA256.HashData(
             Encoding.UTF8.GetBytes(hmacKey),
@@ -43,6 +47,75 @@ public sealed class OfficialComboTests
         Assert.Equal(123456789u, result.ExpectedUid);
         Assert.DoesNotContain("combo-secret", result.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("sdk-secret", subject.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GuestComboRequestOmitsTheSdkToken()
+    {
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                "{\"retcode\":0,\"data\":{\"open_id\":\"guest-id\",\"combo_token\":\"new-combo-token\",\"guest\":true,\"account_type\":0}}",
+                Encoding.UTF8,
+                "application/json"),
+        });
+        using var httpClient = new HttpClient(handler);
+        using var subject = new OfficialComboSessionExchange(httpClient, Options(), "synthetic-hmac-key");
+
+        await subject.ExchangeAsync(SdkSession.Create("guest-id", string.Empty, isGuest: true));
+
+        using JsonDocument request = JsonDocument.Parse(Assert.Single(handler.Bodies));
+        Assert.Equal(
+            "{\"open_id\":\"guest-id\",\"guest\":true}",
+            request.RootElement.GetProperty("data").GetString());
+    }
+
+    [Fact]
+    public async Task OfficialSyntheticVectorUsesTheExactSignedInnerData()
+    {
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                "{\"retcode\":0,\"data\":{\"open_id\":\"test\",\"combo_token\":\"new-token\",\"guest\":false,\"account_type\":1}}",
+                Encoding.UTF8,
+                "application/json"),
+        });
+        using var client = new HttpClient(handler);
+        OfficialClientProfile profile = OfficialClientProfile.OsGlobalV70;
+        using var exchange = new OfficialComboSessionExchange(client, new OfficialComboOptions
+        {
+            Endpoint = profile.ComboEndpoint!,
+            DeviceId = "synthetic-device-id",
+            ApplicationId = profile.ApplicationId,
+            ChannelId = profile.ChannelId,
+            Headers = new OfficialSdkRequestHeaders
+            {
+                DeviceId = "synthetic-device-id",
+                Language = "fr",
+                AppId = 4,
+                ClientType = 3,
+                GameBiz = "hk4e_global",
+                ChannelId = 1,
+                SdkVersion = "2.53.0.196",
+                MdkVersion = "2.53.0.196",
+                ChannelVersion = "2.53.0.196",
+                DeviceFingerprint = "1234567890",
+                SystemVersion = "Windows 11",
+                DeviceModel = "synthetic-model",
+                DeviceName = "synthetic-host",
+            },
+        }, profile.ComboHmacKey!);
+
+        await exchange.ExchangeAsync(SdkSession.Create("test", "token"));
+
+        using JsonDocument request = JsonDocument.Parse(Assert.Single(handler.Bodies));
+        Assert.Equal(
+            "{\"open_id\":\"test\",\"guest\":false,\"combo_token\":\"token\"}",
+            request.RootElement.GetProperty("data").GetString());
+        Assert.Equal(
+            "b4daf92182ee2a94a6d888a62cbf52f9b4bbd8e6c1601f8d8983373efb4faba8",
+            request.RootElement.GetProperty("sign").GetString());
+        Assert.Equal("1234567890", Assert.Single(handler.FingerprintHeaders));
     }
 
     [Fact]
@@ -77,6 +150,7 @@ public sealed class OfficialComboTests
             subject.ExchangeAsync(SdkSession.Create("sdk-uid", "private-sdk-token")));
 
         Assert.Equal(OfficialConnectivityError.ComboExchangeRejected, exception.Error);
+        Assert.Equal(-203, exception.Retcode);
         Assert.Contains("retcode -203", exception.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("private-sdk-token", exception.ToString(), StringComparison.Ordinal);
     }
@@ -112,6 +186,7 @@ public sealed class OfficialComboTests
     {
         public List<string> Bodies { get; } = [];
         public List<string> DeviceHeaders { get; } = [];
+        public List<string> FingerprintHeaders { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -119,6 +194,10 @@ public sealed class OfficialComboTests
         {
             Bodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
             DeviceHeaders.Add(Assert.Single(request.Headers.GetValues("x-rpc-device_id")));
+            if (request.Headers.TryGetValues("x-rpc-device_fp", out IEnumerable<string>? fingerprints))
+            {
+                FingerprintHeaders.Add(Assert.Single(fingerprints));
+            }
             return responder(request);
         }
     }

@@ -1,12 +1,12 @@
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Google.Protobuf;
 using Starlight.Protobuf.Core;
 using Starlight.Protobuf.Registry;
 using Starlight.Protocol;
 using Starlight.Protocol.V70;
 using StarlightExporter.Snapshot;
-using System.Runtime.CompilerServices;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace StarlightExporter.Official;
 
@@ -47,7 +47,8 @@ public static class SanitizedReplaySerializer
     private static readonly ProtocolRegistry Registry = new V70ProtocolRegistry();
 
     private static readonly Dictionary<Type, string> AllowedTypes =
-        new Dictionary<Type, string> {
+        new Dictionary<Type, string>
+        {
             [typeof(PlayerDataNotify)] = nameof(PlayerDataNotify),
             [typeof(PlayerStoreNotify)] = nameof(PlayerStoreNotify),
             [typeof(AvatarDataNotify)] = nameof(AvatarDataNotify),
@@ -56,7 +57,8 @@ public static class SanitizedReplaySerializer
     private static readonly Dictionary<string, Type> AllowedNames = AllowedTypes
         .ToDictionary(pair => pair.Value, pair => pair.Key, StringComparer.Ordinal);
 
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
         PropertyNameCaseInsensitive = false,
         RespectNullableAnnotations = true,
         RespectRequiredConstructorParameters = true,
@@ -99,7 +101,8 @@ public static class SanitizedReplaySerializer
                 throw ReplayFailure($"Message {envelope.Sequence} exceeds the replay message size limit.");
             }
 
-            records.Add(new ReplayMessageRecord {
+            records.Add(new ReplayMessageRecord
+            {
                 Sequence = envelope.Sequence,
                 CmdId = Registry.GetCmdId(envelope.Message),
                 MessageType = typeName,
@@ -107,7 +110,8 @@ public static class SanitizedReplaySerializer
             });
         }
 
-        var document = new ReplayDocument {
+        var document = new ReplayDocument
+        {
             SchemaVersion = CurrentSchemaVersion,
             ProtocolVersion = Registry.Version,
             CapturedAtUtc = context.CapturedAtUtc,
@@ -115,7 +119,8 @@ public static class SanitizedReplaySerializer
             OfficialUid = context.OfficialUid,
             Profile = context.Profile is null
                 ? null
-                : new ReplayProfileRecord {
+                : new ReplayProfileRecord
+                {
                     Signature = context.Profile.Signature,
                     PictureId = context.Profile.PictureId,
                     NameCardId = context.Profile.NameCardId,

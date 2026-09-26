@@ -23,7 +23,8 @@ public static class StarlightGameDataLoader
         }
 
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> {
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
                 ["Game:ResourcesPath"] = fullPath
             })
             .Build();

@@ -1,4 +1,6 @@
+using StarlightExporter.Cli;
 using StarlightExporter.Official;
+using StarlightExporter.Probe;
 
 return await ProbeApplication.RunAsync(args, Console.Out, Console.Error);
 
@@ -25,6 +27,10 @@ internal static class ProbeApplication
 
         try
         {
+            if (args[0] != "runtime-check")
+            {
+                RequireCurrentBuildProfile();
+            }
             using var httpClient = new HttpClient();
             using StarlightRegionCrypto crypto = CreateRegionCrypto();
             var client = new OfficialDispatchClient(httpClient, crypto);
@@ -35,10 +41,26 @@ internal static class ProbeApplication
                     await RunDispatchListAsync(probe, output, cancellationToken),
                 "region" when args.Length == 2 =>
                     await RunRegionAsync(probe, args[1], output, cancellationToken),
+                "sdk-ext-list" when args.Length == 1 =>
+                    await RunSdkExtListAsync(httpClient, output, cancellationToken),
+                "sdk-bootstrap" when args.Length == 1 =>
+                    await RunSdkBootstrapAsync(httpClient, output, cancellationToken),
+                "runtime-check" when args.Length == 2 =>
+                    await RunRuntimeCheckAsync(args[1], output, cancellationToken),
                 "gate-token" when args.Length == 2 =>
                     await RunGateTokenAsync(client, args[1], output, cancellationToken),
                 "gate-login" when args.Length == 2 =>
                     await RunGateLoginAsync(client, args[1], output, cancellationToken),
+                "sdk-preflight" when args.Length == 2 =>
+                    await RunLiveStageAsync(args, null, httpClient, client, output, cancellationToken),
+                "auth-probe" or "combo-probe" or "dispatch-probe" or "gate-token-live" or "gate-login-live"
+                    when args.Length == 3 =>
+                    await RunLiveStageAsync(args, null, httpClient, client, output, cancellationToken),
+                "snapshot-probe" when args.Length == 4 =>
+                    await RunLiveStageAsync(args, args[3], httpClient, client, output, cancellationToken),
+                "snapshot-export" when args.Length >= 10 =>
+                    await RunSnapshotExportAsync(
+                        args, httpClient, client, output, error, cancellationToken),
                 _ => InvalidArguments(error),
             };
         }
@@ -46,6 +68,10 @@ internal static class ProbeApplication
         {
             await error.WriteLineAsync($"probe_status=failed");
             await error.WriteLineAsync($"error_category={OfficialConnectivityDiagnostic.Code(exception.Error)}");
+            if (exception.Retcode is { } retcode)
+            {
+                await error.WriteLineAsync($"retcode={retcode.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            }
             await error.WriteLineAsync($"error_message={OfficialConnectivityDiagnostic.SafeMessage(exception.Error)}");
             return ProbeFailed;
         }
@@ -59,6 +85,20 @@ internal static class ProbeApplication
             await error.WriteLineAsync("probe_status=not_run");
             await error.WriteLineAsync($"configuration_error={exception.Message}");
             return UsageError;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or System.Security.Cryptography.CryptographicException or ArgumentException
+            or InvalidDataException)
+        {
+            await error.WriteLineAsync("probe_status=not_run");
+            await error.WriteLineAsync("configuration_error=The local probe configuration could not be used.");
+            return UsageError;
+        }
+        catch (Exception)
+        {
+            await error.WriteLineAsync("probe_status=failed");
+            await error.WriteLineAsync("error_category=UNEXPECTED");
+            return ProbeFailed;
         }
     }
 
@@ -123,14 +163,69 @@ internal static class ProbeApplication
         return UsageError;
     }
 
+    private static async Task<int> RunSdkExtListAsync(
+        HttpClient httpClient,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        var exchange = new OfficialDeviceFingerprintExchange(
+            httpClient, OfficialDeviceFingerprintOptions.WindowsGlobal700);
+        IReadOnlyList<string> names = await exchange.GetRequestedAttributesAsync(cancellationToken);
+        await output.WriteLineAsync("probe_status=succeeded");
+        await output.WriteLineAsync($"requested_attribute_count={names.Count}");
+        foreach (string name in names)
+        {
+            await output.WriteLineAsync($"requested_attribute={name}");
+        }
+        return 0;
+    }
+
+    private static async Task<int> RunSdkBootstrapAsync(
+        HttpClient httpClient,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        var bootstrap = new OfficialSdkBootstrapClient(
+            httpClient, OfficialSdkBootstrapOptions.WindowsGlobal700);
+        OfficialSdkBootstrapResult result = await bootstrap.AttemptAsync(cancellationToken);
+        await output.WriteLineAsync("probe_status=succeeded");
+        await output.WriteLineAsync($"shield_config_reached={Bool(result.ShieldConfigReached)}");
+        await output.WriteLineAsync($"combo_config_reached={Bool(result.ComboConfigReached)}");
+        return 0;
+    }
+
     private static void WriteUsage(TextWriter output)
     {
         output.WriteLine("StarlightExporter.Probe (opt-in official connectivity checks)");
         output.WriteLine("  dispatch-list       Query public OS Global region metadata.");
         output.WriteLine("  region <name>       Resolve and verify one public regional dispatch.");
+        output.WriteLine("  sdk-ext-list       Read public DeviceFp attribute names without machine or account data.");
+        output.WriteLine("  sdk-bootstrap      Check public SDK config routes without machine or account data.");
+        output.WriteLine("  runtime-check <runtime.json>  Validate local producers without network or credentials.");
         output.WriteLine("  gate-token <name>  Run an authorized token-only Gate probe from runtime environment values.");
         output.WriteLine("  gate-login <name>  Run token + PlayerLogin probes from runtime environment values.");
+        output.WriteLine("  sdk-preflight <runtime.json>  Refresh DeviceFp without reading account credentials.");
+        output.WriteLine("  auth-probe <runtime.json> <official.env>       B1: SDK auth only.");
+        output.WriteLine("  combo-probe <runtime.json> <official.env>      B1 then B2, one session.");
+        output.WriteLine("  dispatch-probe <runtime.json> <official.env>   B1 through B3.");
+        output.WriteLine("  gate-token-live <runtime.json> <official.env>  B1 through B4.");
+        output.WriteLine("  gate-login-live <runtime.json> <official.env>  B1 through B5.");
+        output.WriteLine("  snapshot-probe <runtime.json> <official.env> <snapshot.json>  Capture B6/B7.");
+        output.WriteLine(
+            "  snapshot-export <runtime.json> <official.env> <snapshot.json> --resources <path> "
+            + "--output <directory> --private-account-id <id> [--accounts-db <path>] "
+            + "[--uid-mode preserve|allocate] [--strict]  Capture and build B8.");
+        output.WriteLine("The bundled profile is 7.0.0/V70. Set STARLIGHT_EXPORTER_ALLOW_LEGACY_V70_PROBES=1 only for an intentional legacy-profile diagnostic run.");
         output.WriteLine("Set STARLIGHT_EXPORTER_REGION_VERIFY_KEY_FILE when the pinned verification key is incompatible.");
+    }
+
+    private static void RequireCurrentBuildProfile()
+    {
+        if (Environment.GetEnvironmentVariable("STARLIGHT_EXPORTER_ALLOW_LEGACY_V70_PROBES") != "1")
+        {
+            throw new ProbeConfigurationException(
+                "Only the Windows Global 7.0.0/V70 probe profile is configured; the reported current version is 7.1. Set STARLIGHT_EXPORTER_ALLOW_LEGACY_V70_PROBES=1 only for a deliberate legacy-profile diagnostic run.");
+        }
     }
 
     private static async Task<int> RunGateTokenAsync(
@@ -147,7 +242,7 @@ internal static class ProbeApplication
         GateTokenProbeResult result = await OfficialGateProbeClient.ProbeTokenAsync(
             session,
             region,
-            OfficialClientProfile.OsGlobalV70,
+            ReadGateProfile(),
             cancellationToken: cancellationToken);
 
         await output.WriteLineAsync("probe_status=succeeded");
@@ -179,7 +274,7 @@ internal static class ProbeApplication
         GateLoginProbeResult result = await OfficialGateProbeClient.ProbeLoginAsync(
             session,
             region,
-            OfficialClientProfile.OsGlobalV70,
+            ReadGateProfile(),
             ReadLoginProfile(),
             cancellationToken: cancellationToken);
 
@@ -200,39 +295,158 @@ internal static class ProbeApplication
         uint accountType = OptionalUInt32("STARLIGHT_EXPORTER_COMBO_ACCOUNT_TYPE", 1);
         string countryCode = Environment.GetEnvironmentVariable(
             "STARLIGHT_EXPORTER_COMBO_COUNTRY_CODE") ?? string.Empty;
-        uint expectedUid = RequiredUInt32("STARLIGHT_EXPORTER_OFFICIAL_UID");
         return new ExistingComboSessionProvider(ComboSession.Create(
             accountUid,
             accountToken,
             accountType,
             isGuest: false,
-            countryCode,
-            expectedUid));
+            countryCode));
+    }
+
+    private static async Task<int> RunLiveStageAsync(
+        string[] args,
+        string? snapshotPath,
+        HttpClient httpClient,
+        OfficialDispatchClient dispatchClient,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        await LiveProbeRunner.RunAsync(args[0], args[1], args.Length >= 3 ? args[2] : string.Empty,
+            snapshotPath,
+            httpClient, dispatchClient, ReadGateProfile(), output, cancellationToken);
+        return 0;
+    }
+
+    private static async Task<int> RunSnapshotExportAsync(
+        string[] args,
+        HttpClient httpClient,
+        OfficialDispatchClient dispatchClient,
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken)
+    {
+        string[] databaseArguments = ["build-db", args[3], .. args[4..]];
+        if (!HasRequiredBuildDatabaseArguments(databaseArguments))
+        {
+            throw new ProbeConfigurationException(
+                "snapshot-export requires --resources, --output and --private-account-id.");
+        }
+
+        await LiveProbeRunner.RunAsync(
+            "snapshot-export", args[1], args[2], args[3],
+            httpClient, dispatchClient, ReadGateProfile(), output, cancellationToken);
+
+        // The regular CLI reports the imported UID and may include inventory identifiers in
+        // diagnostics. Keep those details out of the live-probe journal while retaining the
+        // structured exit code for local troubleshooting.
+        using var databaseOutput = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
+        using var databaseError = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
+        int result = await CliApplication.RunAsync(
+            databaseArguments, databaseOutput, databaseError, cancellationToken);
+        if (result == CliApplication.Success)
+        {
+            await output.WriteLineAsync("db_ready=true");
+            await output.WriteLineAsync("probe_status=succeeded");
+        }
+        else
+        {
+            await error.WriteLineAsync("database_export_status=failed");
+            await error.WriteLineAsync(
+                $"database_export_exit_code={result.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+        }
+        return result;
+    }
+
+    private static async Task<int> RunRuntimeCheckAsync(
+        string runtimePath,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        OfficialProbeRuntimeConfig config = OfficialProbeRuntimeConfig.Load(runtimePath);
+        config.RequireLoginInputs();
+        var collector = new ConfiguredDeviceAttributeCollector(config.ExtFields);
+        int available = 0;
+        foreach (string name in OfficialDeviceFingerprintFields.KnownNames)
+        {
+            if (await collector.CollectAsync(name, cancellationToken) is not null)
+            {
+                available++;
+            }
+        }
+
+        await output.WriteLineAsync(
+            $"device_fp_known_fields={OfficialDeviceFingerprintFields.KnownNames.Count}");
+        await output.WriteLineAsync($"device_fp_available_fields={available}");
+        await output.WriteLineAsync(
+            $"device_fp_unavailable_fields={collector.MissingNames.Count}");
+        foreach (string name in collector.MissingNames.Distinct(StringComparer.Ordinal))
+        {
+            await output.WriteLineAsync($"unavailable_device_attribute={name}");
+        }
+        if (OperatingSystem.IsWindows())
+        {
+            WindowsGraphicsInfo? graphics = WindowsGraphicsSources.FirstAdapter();
+            await output.WriteLineAsync($"dxgi_adapter_ready={Bool(graphics is not null)}");
+            await output.WriteLineAsync(
+                $"d3d_feature_ready={Bool(graphics?.DeviceCreationSucceeded == true)}");
+        }
+        await output.WriteLineAsync("player_login_inputs_ready=true");
+        await output.WriteLineAsync("probe_status=succeeded");
+        return 0;
+    }
+
+    private static bool HasRequiredBuildDatabaseArguments(string[] arguments)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (int index = 2; index < arguments.Length; index++)
+        {
+            string name = arguments[index];
+            if (name == "--strict")
+            {
+                continue;
+            }
+            if (name is not ("--resources" or "--output" or "--private-account-id"
+                or "--accounts-db" or "--uid-mode")
+                || ++index >= arguments.Length
+                || string.IsNullOrWhiteSpace(arguments[index]))
+            {
+                return false;
+            }
+            seen.Add(name);
+        }
+
+        return seen.Contains("--resources")
+            && seen.Contains("--output")
+            && seen.Contains("--private-account-id");
     }
 
     private static OfficialPlayerLoginProfile ReadLoginProfile() => new()
     {
-        PlatformName = RequiredEnvironment("STARLIGHT_EXPORTER_LOGIN_PLATFORM_NAME"),
         DeviceInfo = RequiredEnvironment("STARLIGHT_EXPORTER_LOGIN_DEVICE_INFO"),
         DeviceName = RequiredEnvironment("STARLIGHT_EXPORTER_LOGIN_DEVICE_NAME"),
         DeviceUuid = RequiredEnvironment("STARLIGHT_EXPORTER_LOGIN_DEVICE_UUID"),
         SystemVersion = RequiredEnvironment("STARLIGHT_EXPORTER_LOGIN_SYSTEM_VERSION"),
-        Checksum = RequiredEnvironment("STARLIGHT_EXPORTER_LOGIN_CHECKSUM"),
-        ChecksumClientVersion = RequiredEnvironment("STARLIGHT_EXPORTER_LOGIN_CHECKSUM_CLIENT_VERSION"),
-        ClientVersionHash = Environment.GetEnvironmentVariable(
-            "STARLIGHT_EXPORTER_LOGIN_CLIENT_VERSION_HASH") ?? string.Empty,
-        UserAgent = Environment.GetEnvironmentVariable(
-            "STARLIGHT_EXPORTER_LOGIN_USER_AGENT") ?? string.Empty,
-        RegistrationPlatform = OptionalUInt32("STARLIGHT_EXPORTER_LOGIN_REGISTRATION_PLATFORM", 3),
+        DeviceFingerprint = Environment.GetEnvironmentVariable(
+            "STARLIGHT_EXPORTER_LOGIN_DEVICE_FP") ?? string.Empty,
+        SecurityLibraryMd5 = Environment.GetEnvironmentVariable(
+            "STARLIGHT_EXPORTER_LOGIN_SECURITY_LIBRARY_MD5") ?? string.Empty,
+        ScreenWidth = checked((int)OptionalUInt32("STARLIGHT_EXPORTER_LOGIN_SCREEN_WIDTH", 0)),
+        ScreenHeight = checked((int)OptionalUInt32("STARLIGHT_EXPORTER_LOGIN_SCREEN_HEIGHT", 0)),
     };
 
     private static StarlightRegionCrypto CreateRegionCrypto()
+    {
+        return StarlightRegionCrypto.CreatePinnedWithVerificationKey(
+            ReadGateProfile().GateServerPublicKeyPem);
+    }
+
+    private static OfficialClientProfile ReadGateProfile()
     {
         string? path = Environment.GetEnvironmentVariable(
             "STARLIGHT_EXPORTER_REGION_VERIFY_KEY_FILE");
         if (string.IsNullOrWhiteSpace(path))
         {
-            return StarlightRegionCrypto.CreatePinned();
+            return OfficialClientProfile.OsGlobalV70;
         }
         if (!File.Exists(path))
         {
@@ -240,7 +454,10 @@ internal static class ProbeApplication
                 "STARLIGHT_EXPORTER_REGION_VERIFY_KEY_FILE does not exist.");
         }
 
-        return StarlightRegionCrypto.CreatePinnedWithVerificationKey(File.ReadAllText(path));
+        return OfficialClientProfile.OsGlobalV70 with
+        {
+            GateServerPublicKeyPem = File.ReadAllText(path),
+        };
     }
 
     private static string RequiredEnvironment(string name)
@@ -251,18 +468,6 @@ internal static class ProbeApplication
             throw new ProbeConfigurationException($"Required environment variable {name} is missing.");
         }
         return value;
-    }
-
-    private static uint RequiredUInt32(string name)
-    {
-        string value = RequiredEnvironment(name);
-        if (!uint.TryParse(value, System.Globalization.NumberStyles.None,
-            System.Globalization.CultureInfo.InvariantCulture, out uint result)
-            || result == 0)
-        {
-            throw new ProbeConfigurationException($"Environment variable {name} must be a non-zero UInt32.");
-        }
-        return result;
     }
 
     private static uint OptionalUInt32(string name, uint defaultValue)
@@ -287,11 +492,12 @@ internal static class ProbeApplication
         foreach (GateMetadataTraceRecord record in trace)
         {
             output.WriteLine(
-                $"trace={record.Sequence:D3};elapsed_ms={record.ElapsedMilliseconds};phase={record.Phase};direction={record.Direction};cmd_id={record.CommandId};type={record.MessageType};bytes={record.SerializedBodyBytes};retcode={record.Retcode?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "n/a"}");
+                $"trace={record.Sequence:D3};elapsed_ms={record.ElapsedMilliseconds};phase={record.Phase};direction={record.Direction};cmd_id={record.CommandId};type={record.MessageType};bytes={record.SerializedBodyBytes};chunked={Bool(record.Chunked)};duplicate={Bool(record.Duplicate)};presence={record.FieldPresenceHash};retcode={record.Retcode?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "n/a"}");
         }
     }
 
     private static string Bool(bool value) => value.ToString().ToLowerInvariant();
 
-    private sealed class ProbeConfigurationException(string message) : Exception(message);
+    private static string Bool(bool? value) => value is null ? "n/a" : Bool(value.Value);
+
 }

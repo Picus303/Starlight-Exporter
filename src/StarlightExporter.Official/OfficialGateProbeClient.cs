@@ -9,6 +9,7 @@ public sealed record OfficialGateProbeOptions
     public TimeSpan PlayerTokenTimeout { get; init; } = TimeSpan.FromSeconds(10);
     public TimeSpan PlayerLoginTimeout { get; init; } = TimeSpan.FromSeconds(30);
     public int MaximumPreLoginMessages { get; init; } = 1024;
+    public GateMetadataTrace? MetadataTrace { get; init; }
 }
 
 public sealed record GateTokenProbeResult
@@ -18,7 +19,7 @@ public sealed record GateTokenProbeResult
     public required bool TransportTokenAssigned { get; init; }
     public required bool InitialPadDerived { get; init; }
     public required bool PlayerTokenResponseReceived { get; init; }
-    public required bool PlayerUidMatchesExpected { get; init; }
+    public required bool? PlayerUidMatchesExpected { get; init; }
     public required bool KeyIdMatches { get; init; }
     public required bool ServerRandomKeyDecrypted { get; init; }
     public required bool ServerSignatureValid { get; init; }
@@ -47,7 +48,7 @@ public static class OfficialGateProbeClient
     {
         options ??= new OfficialGateProbeOptions();
         ValidateOptions(options);
-        var trace = new GateMetadataTrace();
+        GateMetadataTrace trace = options.MetadataTrace ?? new GateMetadataTrace();
         long started = Stopwatch.GetTimestamp();
 
         await using OfficialKcpTransport transport = await OfficialKcpTransport.ConnectAsync(
@@ -56,6 +57,7 @@ public static class OfficialGateProbeClient
             cancellationToken: cancellationToken);
         using OfficialGateCipherState cipher = OfficialGateCipherState.FromRegion(region);
         var codec = new OfficialGatePacketCodec();
+        var outgoingPackets = new OfficialGatePacketSequencer();
         OfficialPlayerTokenResult token = await ExchangeTokenAsync(
             session,
             region,
@@ -63,6 +65,7 @@ public static class OfficialGateProbeClient
             transport,
             cipher,
             codec,
+            outgoingPackets,
             trace,
             started,
             options.PlayerTokenTimeout,
@@ -81,7 +84,7 @@ public static class OfficialGateProbeClient
     {
         options ??= new OfficialGateProbeOptions();
         ValidateOptions(options);
-        var trace = new GateMetadataTrace();
+        GateMetadataTrace trace = options.MetadataTrace ?? new GateMetadataTrace();
         long started = Stopwatch.GetTimestamp();
 
         await using OfficialKcpTransport transport = await OfficialKcpTransport.ConnectAsync(
@@ -90,6 +93,7 @@ public static class OfficialGateProbeClient
             cancellationToken: cancellationToken);
         using OfficialGateCipherState cipher = OfficialGateCipherState.FromRegion(region);
         var codec = new OfficialGatePacketCodec();
+        var outgoingPackets = new OfficialGatePacketSequencer();
         OfficialPlayerTokenResult token = await ExchangeTokenAsync(
             session,
             region,
@@ -97,6 +101,7 @@ public static class OfficialGateProbeClient
             transport,
             cipher,
             codec,
+            outgoingPackets,
             trace,
             started,
             options.PlayerTokenTimeout,
@@ -114,7 +119,7 @@ public static class OfficialGateProbeClient
             clientProfile,
             loginProfile,
             token);
-        byte[] request = login.EncodeRequest(codec, cipher);
+        byte[] request = login.EncodeRequest(codec, cipher, outgoingPackets.Next());
         trace.Add(
             Elapsed(started),
             GateTracePhase.PlayerLogin,
@@ -174,6 +179,7 @@ public static class OfficialGateProbeClient
         OfficialKcpTransport transport,
         OfficialGateCipherState cipher,
         OfficialGatePacketCodec codec,
+        OfficialGatePacketSequencer outgoingPackets,
         GateMetadataTrace trace,
         long started,
         TimeSpan timeout,
@@ -183,7 +189,7 @@ public static class OfficialGateProbeClient
             session,
             region,
             clientProfile);
-        byte[] request = exchange.EncodeRequest(codec, cipher);
+        byte[] request = exchange.EncodeRequest(codec, cipher, outgoingPackets.Next());
         trace.Add(
             Elapsed(started),
             GateTracePhase.PlayerToken,
@@ -228,7 +234,9 @@ public static class OfficialGateProbeClient
             TransportTokenAssigned = transport.Connection.Token != 0,
             InitialPadDerived = true,
             PlayerTokenResponseReceived = true,
-            PlayerUidMatchesExpected = session.ExpectedUid is null || session.ExpectedUid == token.PlayerUid,
+            PlayerUidMatchesExpected = session.ExpectedUid is { } expectedUid
+                ? expectedUid == token.PlayerUid
+                : null,
             KeyIdMatches = clientProfile.KeyId != 0,
             ServerRandomKeyDecrypted = true,
             ServerSignatureValid = true,

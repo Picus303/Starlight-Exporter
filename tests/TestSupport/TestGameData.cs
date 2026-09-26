@@ -11,12 +11,14 @@ internal static class TestGameData
     {
         var data = new GameData(new ConfigurationBuilder().Build());
         data.MaterialData[1001] = new MaterialData { Id = 1001, StackLimit = 9999 };
-        data.WeaponData[11101] = new WeaponData {
+        data.WeaponData[11101] = new WeaponData
+        {
             Id = 11101,
             GadgetId = 50011101,
             SkillAffix = [11101]
         };
-        data.AvatarData[10000005] = new AvatarData {
+        data.AvatarData[10000005] = new AvatarData
+        {
             Id = 10000005,
             InitialWeapon = 11101,
             SkillDepotId = 500,
@@ -26,7 +28,8 @@ internal static class TestGameData
             CritChanceBase = 0.05f,
             CritDamageBase = 0.5f
         };
-        data.AvatarSkillDepotData[500] = new AvatarSkillDepotData {
+        data.AvatarSkillDepotData[500] = new AvatarSkillDepotData
+        {
             Id = 500,
             Skills = [501],
             EnergySkill = 502

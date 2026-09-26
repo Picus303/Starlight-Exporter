@@ -28,7 +28,7 @@ public sealed class ComboSession
     public static ComboSession Create(
         string accountUid,
         string accountToken,
-        uint accountType = 1,
+        uint accountType = 0,
         bool isGuest = false,
         string countryCode = "",
         uint? expectedUid = null)
@@ -54,5 +54,5 @@ public sealed class ComboSession
     }
 
     public override string ToString() =>
-        $"ComboSession {{ AccountUid = [REDACTED], AccountType = {AccountType}, IsGuest = {IsGuest}, ExpectedUid = {ExpectedUid}, AccountToken = [REDACTED] }}";
+        $"ComboSession {{ AccountUid = [REDACTED], AccountType = {AccountType}, IsGuest = {IsGuest}, ExpectedUid = [REDACTED], AccountToken = [REDACTED] }}";
 }

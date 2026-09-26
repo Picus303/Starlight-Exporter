@@ -55,7 +55,8 @@ public static class PrivateAccountDatabaseWriter
 
         try
         {
-            var connectionString = new SqliteConnectionStringBuilder {
+            var connectionString = new SqliteConnectionStringBuilder
+            {
                 DataSource = temporaryPath,
                 Mode = SqliteOpenMode.ReadWriteCreate,
                 Pooling = false,
@@ -68,7 +69,8 @@ public static class PrivateAccountDatabaseWriter
             await using (var database = new SdkDbContext(options))
             {
                 await database.Database.EnsureCreatedAsync(cancellationToken);
-                var account = new Account {
+                var account = new Account
+                {
                     Username = username,
                     PasswordHash = Argon2Crypto.Hash(password),
                     PasswordTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
@@ -102,7 +104,8 @@ public static class PrivateAccountDatabaseWriter
         string username,
         CancellationToken cancellationToken)
     {
-        var connectionString = new SqliteConnectionStringBuilder {
+        var connectionString = new SqliteConnectionStringBuilder
+        {
             DataSource = path,
             Mode = SqliteOpenMode.ReadOnly,
             Pooling = false,
